@@ -22,6 +22,11 @@ common = """
   alias workspace-status="$META_REPO_ROOT/scripts/status"
 """
 
+[services]
+
+[build]
+command = "bun install && bun run build"
+
 [options]
 systems = ["x86_64-linux"]
 allow.unfree = true
