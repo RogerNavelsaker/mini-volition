@@ -1474,10 +1474,37 @@ async function assembleTurnContext(agentName: string, burst: IncomingBurst, wake
   };
 }
 
+// System prompt assembly — reads base + per-agent overlay from prompts/
+const promptsDir = join(process.cwd(), "prompts");
+
+function readPromptFile(filename: string): string {
+  try {
+    return readFileSync(join(promptsDir, filename), "utf-8").trim();
+  } catch {
+    return "";
+  }
+}
+
+// Cache prompt files (they don't change during runtime)
+let cachedBaseSystem: string | null = null;
+let cachedAgentOverlay: string | null = null;
+
 function renderSystemPrompt(agentName: string, burst: IncomingBurst): string {
-  // Minimal system prompt for provider mode — the full context is in the user message (renderTurnPrompt).
-  // Future: split identity/rules into system, turn context into user message.
-  return `You are ${agentName}, a fleet agent. Respond with a valid JSON action envelope. No prose outside JSON.`;
+  if (cachedBaseSystem === null) {
+    const raw = readPromptFile("base-system.md");
+    // Template substitution
+    cachedBaseSystem = raw
+      .replace(/\{\{\s*agent_name\s*\}\}/g, agentName)
+      .replace(/\{\{\s*output_budget\s*\}\}/g, String(OUTPUT_BUDGET_CHARS))
+      .replace(/\{\{\s*machete_limit\s*\}\}/g, String(MACHETE_LIMIT));
+  }
+  if (cachedAgentOverlay === null) {
+    cachedAgentOverlay = readPromptFile(`${agentName}-system.md`);
+  }
+
+  const parts = [cachedBaseSystem];
+  if (cachedAgentOverlay) parts.push(cachedAgentOverlay);
+  return parts.join("\n\n---\n\n");
 }
 
 function renderTurnPrompt(agentName: string, burst: IncomingBurst, turn: TurnAssembly): string {
@@ -1557,19 +1584,7 @@ ${traceLines.length ? traceLines.join("\n") : "- (none)"}
 ${workingLines.length ? workingLines.join("\n") : "- (start)"}
 §SCRATCHPAD ${turn.scratchpadStatus.chars}/${turn.scratchpadStatus.cap}${turn.scratchpadStatus.warning ? ` ⚠ ${turn.scratchpadStatus.warning}` : ""}
 ${turn.scratchpad ? budgetSection(turn.scratchpad.split("\n"), BUDGET_SCRATCHPAD_CHARS).join("\n") : "- (empty)"}
-§POLICY
-Stateless outside this context. Recent observations override older memory. Return only compact JSON envelope. Output budget: ${OUTPUT_BUDGET_CHARS} chars max.
-§ENVELOPE
-Return compact JSON: {"actions":[...]}
-Optional keys: schema_version(number), summary(string), state:{current_task:string}
-τ reply: {τ:"reply","message":"...","channel":"same"} → replies on ${msg.layer} to ${msg.sender}
-τ noop: {τ:"noop"}
-τ note: {τ:"note","message":"..."} → working memory
-τ sleep_until: {τ:"sleep_until","until":"ISO8601"}
-τ queue_task: {τ:"queue_task","task":"...","target_agent":"...","priority":"low|normal|high|urgent","run_at":"ISO8601"}
-τ escalate: {τ:"escalate","message":"...","channel":"private|urgent"} ↑ operator
-τ scratchpad: {τ:"scratchpad","op":"append|replace|clear","content":"..."} → your persistent notepad. Injected every turn. You manage it. Prune when warned.
-Rules: channel integrity enforced by harness. No prose outside JSON. No transport commands. actions[] even for single action. Compact: no unnecessary whitespace.
+§REMINDER budget=${OUTPUT_BUDGET_CHARS} reply→${msg.layer}→${msg.sender} JSON only
 §BURST
 ${turn.inboundBurstText}
 `;
