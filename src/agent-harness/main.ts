@@ -12,7 +12,9 @@ import { ensureTurnJournal, recoverInterruptedTurns, replayPolicyForAction, type
 
 const name = process.env.AGENT_NAME;
 const command = process.env.AGENT_COMMAND?.split(" ") || [];
-const promptMode = process.env.AGENT_PROMPT_MODE || "stdin";
+const promptMode = process.env.AGENT_PROMPT_MODE || "provider";
+const providerSocket = process.env.FLEET_PROVIDER_SOCKET || "";
+const providerModel = process.env.FLEET_PROVIDER_MODEL || "";
 const mailBin = process.env.AGENT_MAIL_BIN || "agent-mail";
 const memoryDbPath = process.env.AGENT_MEMORY_DB || "runtime/agent-memory.db";
 const stateDbPath = process.env.AGENT_STATE_DB || "runtime/agent-state.db";
@@ -121,13 +123,23 @@ function scratchpadStatus(content: string): { chars: number; cap: number; ratio:
   return { chars, cap: SCRATCHPAD_CAP, ratio, warning };
 }
 
-if (!name || command.length === 0) {
-  console.error("AGENT_NAME and AGENT_COMMAND are required");
+if (!name) {
+  console.error("AGENT_NAME is required");
   process.exit(64);
 }
 
-if (promptMode !== "acp") {
-  console.error(`Unsupported AGENT_PROMPT_MODE '${promptMode}'. The harness only supports ACP mode.`);
+if (promptMode === "provider") {
+  if (!providerSocket) {
+    console.error("FLEET_PROVIDER_SOCKET is required in provider mode");
+    process.exit(64);
+  }
+} else if (promptMode === "acp") {
+  if (command.length === 0) {
+    console.error("AGENT_COMMAND is required in ACP mode");
+    process.exit(64);
+  }
+} else {
+  console.error(`Unsupported AGENT_PROMPT_MODE '${promptMode}'. Supported: provider, acp`);
   process.exit(64);
 }
 
@@ -1130,6 +1142,70 @@ function requestScribe(scribeName: string, task: string): Promise<string | null>
   });
 }
 
+type ProviderTurnResponse = {
+  content: string;
+  usage: { input_tokens: number; output_tokens: number };
+  model: string;
+  stop_reason: string;
+  source: string;
+  error?: string;
+};
+
+function requestProviderTurn(
+  socketPath: string,
+  model: string,
+  system: string,
+  promptText: string,
+  maxTokens: number,
+  temperature: number,
+  timeoutMs: number,
+): Promise<ProviderTurnResponse> {
+  return new Promise((resolve) => {
+    const socket = createConnection(socketPath);
+    let buffer = "";
+    let settled = false;
+    const finish = (value: ProviderTurnResponse) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { socket.end(); } catch {}
+      resolve(value);
+    };
+    const errorResponse = (error: string): ProviderTurnResponse => ({
+      content: "",
+      usage: { input_tokens: 0, output_tokens: 0 },
+      model,
+      stop_reason: "error",
+      source: "harness",
+      error,
+    });
+    const timer = setTimeout(() => finish(errorResponse(`Provider turn timed out after ${timeoutMs}ms`)), timeoutMs);
+    socket.on("connect", () => {
+      socket.write(`${JSON.stringify({
+        type: "turn",
+        model,
+        system,
+        messages: [{ role: "user", content: promptText }],
+        max_tokens: maxTokens,
+        temperature,
+      })}\n`);
+    });
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf-8");
+      const newline = buffer.indexOf("\n");
+      if (newline === -1) return;
+      try {
+        const parsed = JSON.parse(buffer.slice(0, newline).trim());
+        finish(parsed);
+      } catch {
+        finish(errorResponse("Failed to parse provider response"));
+      }
+    });
+    socket.on("error", (err) => finish(errorResponse(`Provider socket error: ${err.message}`)));
+    socket.on("end", () => { if (!settled) finish(errorResponse("Provider socket closed unexpectedly")); });
+  });
+}
+
 async function chooseTurnExecutionProfile(source: WakeSource, burst: IncomingBurst): Promise<TurnExecutionProfile> {
   const fallbackProfile = chooseTurnProfile(source, burst);
   const modelChoice = await requestInferenceTurnProfile(source, burst);
@@ -1398,6 +1474,12 @@ async function assembleTurnContext(agentName: string, burst: IncomingBurst, wake
   };
 }
 
+function renderSystemPrompt(agentName: string, burst: IncomingBurst): string {
+  // Minimal system prompt for provider mode — the full context is in the user message (renderTurnPrompt).
+  // Future: split identity/rules into system, turn context into user message.
+  return `You are ${agentName}, a fleet agent. Respond with a valid JSON action envelope. No prose outside JSON.`;
+}
+
 function renderTurnPrompt(agentName: string, burst: IncomingBurst, turn: TurnAssembly): string {
   const msg = burst.primary;
 
@@ -1650,151 +1732,179 @@ async function processWakeEvent(
     });
     refreshMemoryAsync(name);
 
-    const agent = spawn(command, {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: {
-        ...process.env,
-        FLEET_REPLY_TO: msg.sender,
-        FLEET_REPLY_LAYER: msg.layer,
-      },
-    });
-
     let responseText = "";
     let diagnosticBuffer = "";
     let liveLimitState: LimitState = "none";
     let liveLimitInfo = "";
-    let liveLimitTriggered = false;
-    let deadmanTriggered = false;
-    let deadmanReason = "";
 
-    let resolveLimitSignal: ((value: { state: LimitState; info: string }) => void) | null = null;
-    const limitSignal = new Promise<{ state: LimitState; info: string }>((resolve) => {
-      resolveLimitSignal = resolve;
-    });
+    if (promptMode === "provider") {
+      // --- Provider socket mode: single turn request ---
+      const turnModel = executionProfile.model ?? providerModel;
+      if (!turnModel) {
+        diagnosticBuffer += "No model specified (FLEET_PROVIDER_MODEL or execution profile model required)\n";
+      }
+      const turnResponse = await requestProviderTurn(
+        providerSocket,
+        turnModel,
+        renderSystemPrompt(name, burst),
+        promptText,
+        parseInt(process.env.FLEET_OUTPUT_BUDGET || "8192", 10),
+        executionProfile.profile === "light" ? 0.3 : 1.0,
+        turnTimeoutMs,
+      );
+      responseText = turnResponse.content;
+      if (turnResponse.error) {
+        diagnosticBuffer += `Provider error: ${turnResponse.error}\n`;
+      }
+      if (turnResponse.stop_reason === "rate_limited") {
+        liveLimitState = "quota_exhausted";
+        liveLimitInfo = turnResponse.error ?? "rate limited";
+      }
+      if (turnResponse.usage) {
+        recordWorking("system", `Token usage: input=${turnResponse.usage.input_tokens} output=${turnResponse.usage.output_tokens} model=${turnResponse.model} source=${turnResponse.source}`);
+      }
+      console.log(responseText);
+    } else {
+      // --- Legacy ACP subprocess mode ---
+      const agent = spawn(command, {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          FLEET_REPLY_TO: msg.sender,
+          FLEET_REPLY_LAYER: msg.layer,
+        },
+      });
 
-    const deadmanTimer = setTimeout(() => {
-      deadmanTriggered = true;
-      deadmanReason = `turn timed out after ${turnTimeoutMs}ms`;
-      diagnosticBuffer += `[DEADMAN] ${deadmanReason}\n`;
-      resolvePendingAcpError(deadmanReason);
-      try {
-        agent.kill();
-      } catch {}
-    }, turnTimeoutMs);
+      let deadmanTriggered = false;
+      let deadmanReason = "";
+      let liveLimitTriggered = false;
 
-    const triggerLiveLimit = () => {
-      if (liveLimitTriggered) return;
-      const state = classifyLimitState(diagnosticBuffer, 1);
-      if (state !== "quota_exhausted" && state !== "transient_capacity") return;
+      let resolveLimitSignal: ((value: { state: LimitState; info: string }) => void) | null = null;
+      const limitSignal = new Promise<{ state: LimitState; info: string }>((resolve) => {
+        resolveLimitSignal = resolve;
+      });
 
-      liveLimitTriggered = true;
-      liveLimitState = state;
-      liveLimitInfo = extractLimitInfo(diagnosticBuffer);
-      resolveLimitSignal?.({ state: liveLimitState, info: liveLimitInfo });
-      try {
-        agent.kill();
-      } catch {}
-    };
+      const deadmanTimer = setTimeout(() => {
+        deadmanTriggered = true;
+        deadmanReason = `turn timed out after ${turnTimeoutMs}ms`;
+        diagnosticBuffer += `[DEADMAN] ${deadmanReason}\n`;
+        resolvePendingAcpError(deadmanReason);
+        try { agent.kill(); } catch {}
+      }, turnTimeoutMs);
 
-    const stdoutReader = (async () => {
-    const decoder = new TextDecoder();
-    let buffer = "";
-    for await (const chunk of agent.stdout) {
-      buffer += decoder.decode(chunk);
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const resJson = JSON.parse(line);
-          if (resJson.id !== undefined) {
-            const resolver = acpPendingRequests.get(resJson.id);
-            if (resolver) {
-              acpPendingRequests.delete(resJson.id);
-              resolver({ result: resJson.result, error: resJson.error });
-            }
-          } else if (resJson.method === "session/update") {
-            const update = resJson.params.update;
-            if (update.sessionUpdate === "agent_message_chunk") {
-              const chunk = update.content.text;
-              process.stdout.write(chunk);
-              responseText += chunk;
+      const triggerLiveLimit = () => {
+        if (liveLimitTriggered) return;
+        const state = classifyLimitState(diagnosticBuffer, 1);
+        if (state !== "quota_exhausted" && state !== "transient_capacity") return;
+        liveLimitTriggered = true;
+        liveLimitState = state;
+        liveLimitInfo = extractLimitInfo(diagnosticBuffer);
+        resolveLimitSignal?.({ state: liveLimitState, info: liveLimitInfo });
+        try { agent.kill(); } catch {}
+      };
+
+      const stdoutReader = (async () => {
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for await (const chunk of agent.stdout) {
+          buffer += decoder.decode(chunk);
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const resJson = JSON.parse(line);
+              if (resJson.id !== undefined) {
+                const resolver = acpPendingRequests.get(resJson.id);
+                if (resolver) {
+                  acpPendingRequests.delete(resJson.id);
+                  resolver({ result: resJson.result, error: resJson.error });
+                }
+              } else if (resJson.method === "session/update") {
+                const update = resJson.params.update;
+                if (update.sessionUpdate === "agent_message_chunk") {
+                  const chunk = update.content.text;
+                  process.stdout.write(chunk);
+                  responseText += chunk;
+                }
+              }
+            } catch {
+              process.stdout.write(line + "\n");
+              diagnosticBuffer += line + "\n";
+              triggerLiveLimit();
             }
           }
-        } catch {
-          process.stdout.write(line + "\n");
-          diagnosticBuffer += line + "\n";
+        }
+      })();
+
+      const stderrReader = (async () => {
+        const decoder = new TextDecoder();
+        for await (const chunk of agent.stderr) {
+          const text = decoder.decode(chunk);
+          process.stdout.write(text);
+          diagnosticBuffer += text;
           triggerLiveLimit();
         }
+      })();
+
+      const initRes = await acpCall(agent.stdin, "initialize", {
+        protocolVersion: 1,
+        clientInfo: { name: "agent-harness", version: "1.0" },
+        clientCapabilities: {}
+      });
+      if (initRes.error) diagnosticBuffer += acpErrorText(initRes.error) + "\n";
+
+      const sessionRes = await acpCall(agent.stdin, "session/new", {
+        cwd: process.cwd(),
+        mcpServers: [],
+        model: executionProfile.model ?? undefined,
+        reasoningEffort: executionProfile.reasoning_effort ?? undefined,
+        metadata: {
+          fleet_profile: executionProfile.profile,
+          fleet_profile_source: executionProfile.source,
+          fleet_profile_reason: executionProfile.reason,
+        }
+      });
+      if (sessionRes.error) diagnosticBuffer += acpErrorText(sessionRes.error) + "\n";
+      triggerLiveLimit();
+      const sessionId = sessionRes.result?.sessionId;
+
+      let promptRes: AcpResponse | null = null;
+      if (sessionId) {
+        const promptOutcome = await Promise.race([
+          acpCall(agent.stdin, "session/prompt", {
+            sessionId,
+            prompt: [{ type: "text", text: promptText }]
+          }).then((response) => ({ type: "response" as const, response })),
+          limitSignal.then((limit) => ({ type: "limit" as const, limit })),
+        ]);
+
+        if (promptOutcome.type === "response") {
+          promptRes = promptOutcome.response;
+          if (promptRes.error) diagnosticBuffer += acpErrorText(promptRes.error) + "\n";
+          triggerLiveLimit();
+        } else {
+          liveLimitState = promptOutcome.limit.state;
+          liveLimitInfo = promptOutcome.limit.info;
+        }
+      } else {
+        diagnosticBuffer += "ACP session/new did not return a sessionId.\n";
+      }
+
+      try { agent.kill(); } catch {}
+      const exitCode = await agent.exited;
+      await Promise.all([stdoutReader, stderrReader]);
+      clearTimeout(deadmanTimer);
+
+      const acpLimitState = liveLimitState !== "none" ? liveLimitState : classifyLimitState(diagnosticBuffer, exitCode);
+      if (acpLimitState === "quota_exhausted" || acpLimitState === "transient_capacity") {
+        liveLimitState = acpLimitState;
       }
     }
-    })();
 
-    const stderrReader = (async () => {
-    const decoder = new TextDecoder();
-    for await (const chunk of agent.stderr) {
-      const text = decoder.decode(chunk);
-      process.stdout.write(text);
-      diagnosticBuffer += text;
-      triggerLiveLimit();
-    }
-    })();
-
-    const initRes = await acpCall(agent.stdin, "initialize", {
-    protocolVersion: 1,
-    clientInfo: { name: "agent-harness", version: "1.0" },
-    clientCapabilities: {}
-  });
-    if (initRes.error) diagnosticBuffer += acpErrorText(initRes.error) + "\n";
-
-    const sessionRes = await acpCall(agent.stdin, "session/new", {
-    cwd: process.cwd(),
-    mcpServers: [],
-    model: executionProfile.model ?? undefined,
-    reasoningEffort: executionProfile.reasoning_effort ?? undefined,
-    metadata: {
-      fleet_profile: executionProfile.profile,
-      fleet_profile_source: executionProfile.source,
-      fleet_profile_reason: executionProfile.reason,
-    }
-  });
-    if (sessionRes.error) diagnosticBuffer += acpErrorText(sessionRes.error) + "\n";
-    triggerLiveLimit();
-    const sessionId = sessionRes.result?.sessionId;
-
-    let promptRes: AcpResponse | null = null;
-    if (sessionId) {
-    const promptOutcome = await Promise.race([
-      acpCall(agent.stdin, "session/prompt", {
-        sessionId,
-        prompt: [{ type: "text", text: promptText }]
-      }).then((response) => ({ type: "response" as const, response })),
-      limitSignal.then((limit) => ({ type: "limit" as const, limit })),
-    ]);
-
-    if (promptOutcome.type === "response") {
-      promptRes = promptOutcome.response;
-      if (promptRes.error) diagnosticBuffer += acpErrorText(promptRes.error) + "\n";
-      triggerLiveLimit();
-    } else {
-      liveLimitState = promptOutcome.limit.state;
-      liveLimitInfo = promptOutcome.limit.info;
-    }
-    } else {
-      diagnosticBuffer += "ACP session/new did not return a sessionId.\n";
-    }
-
-    try {
-      agent.kill();
-    } catch {}
-    const exitCode = await agent.exited;
-    await Promise.all([stdoutReader, stderrReader]);
-    clearTimeout(deadmanTimer);
-
-    const limitState = liveLimitState !== "none" ? liveLimitState : classifyLimitState(diagnosticBuffer, exitCode);
-    const isLimited = limitState === "quota_exhausted" || limitState === "transient_capacity";
+    const isLimited = liveLimitState === "quota_exhausted" || liveLimitState === "transient_capacity";
 
   // --- Machete: hard truncation before envelope parsing ---
     const macheted = applyMachete(responseText);
@@ -2006,17 +2116,10 @@ async function processWakeEvent(
     }
     }
 
-    if (deadmanTriggered) {
-      recordBufferedTurnPhase("failed", deadmanReason);
-      flushTurnEventBatch(bufferedTurnPhases, bufferedTurnCheckpoints);
-      setRuntimeState("error", currentTask, "turn_timeout", deadmanReason, null, String(msg.id));
-      if (msg.layer === "internal") failInternalJob(msg.id, deadmanReason);
-      else sendMessage(msg.sender, msg.layer, `[SYSTEM MESSAGE]: The agent '${name}' timed out and no actions were executed.`);
-      sendMessage("operator", "urgent", `[DEADMAN] ${name} ${deadmanReason} during ${wake.wakeReason}`);
-      recordWorking("system", `Deadman timeout: ${deadmanReason}`);
-      console.error(`Deadman timeout for ${name}: ${deadmanReason}`);
-    } else if (promptRes?.error) {
-      const errorText = acpErrorText(promptRes.error);
+    // Check for provider-level errors in diagnosticBuffer (covers both modes)
+    const hasProviderError = diagnosticBuffer.includes("Provider error:") || diagnosticBuffer.includes("[DEADMAN]") || diagnosticBuffer.includes("ACP prompt failed");
+    if (hasProviderError && !responseText && !isLimited) {
+      const errorText = diagnosticBuffer.trim().split("\n").pop() || "Provider turn failed";
       recordBufferedTurnCheckpoint({
         turn_key: turnKey,
         wake_source: wake.source,
@@ -2029,14 +2132,14 @@ async function processWakeEvent(
         burst_count: burst.mergedCount,
         prompt_hash: checkpointPromptHash,
         prompt_chars: checkpointPromptChars,
-        envelope_status: "acp_prompt_error",
+        envelope_status: "provider_error",
         envelope_summary: null,
       });
       recordBufferedTurnPhase("failed", errorText);
       flushTurnEventBatch(bufferedTurnPhases, bufferedTurnCheckpoints);
-      setRuntimeState("error", currentTask, "acp_prompt_error", errorText, null, String(msg.id));
+      setRuntimeState("error", currentTask, "provider_error", errorText, null, String(msg.id));
       if (msg.layer === "internal") failInternalJob(msg.id, errorText);
-      console.error(`ACP prompt failed for ${name}: ${errorText}`);
+      console.error(`Provider turn failed for ${name}: ${errorText}`);
     } else if (!envelope) {
       const invalidReason = envelopeResult?.ok === false ? envelopeResult.error : "Agent did not return valid JSON envelope.";
       recordBufferedTurnCheckpoint({
