@@ -66,6 +66,10 @@ Only these binaries are part of the intended surface:
 - `fleet-rerank`
 - `fleet-e2b`
 - `fleet-e4b`
+- `fleet-claude`
+- `fleet-gemini`
+- `fleet-openai`
+- `fleet-openrouter`
 
 Do not reintroduce:
 
@@ -77,13 +81,15 @@ Do not reintroduce:
 - `fleet-inference` (replaced by dedicated per-model workers)
 - `messages.db`
 - `inference.sock`
+- ACP adapter CLIs (`@agentclientprotocol/claude-agent-acp`, `gmi --acp`, `codex-acp`)
 
 ## current behavioral rules
 
-- agents run only in ACP mode
+- the harness communicates with cloud models through provider socket workers (fleet-claude, fleet-gemini, fleet-openai, fleet-openrouter), not through ACP CLI adapters
+- legacy ACP mode is preserved behind `AGENT_PROMPT_MODE=acp` for transition but is not the default
 - the harness owns prompting, envelope parsing, and normal reply dispatch
 - the harness owns wake selection across current sources
-- the harness selects model tier and effort/reasoning level per turn (split-brain via ACP), using local-model assistance when available and deterministic fallback otherwise
+- the harness selects model tier and effort/reasoning level per turn (split-brain), using local-model assistance when available and deterministic fallback otherwise
 - split-brain re-run policy: if a `light` turn completes with an `escalate` action, high/urgent `queue_task`, or `sleep_until`, the harness detects complexity mismatch and re-queues the wake as a high-priority internal job forced to `full` profile
 - agents should not construct transport commands for normal replies
 - `agent-mail` is transport only
@@ -149,12 +155,19 @@ Do not reintroduce:
 - `agent-mail release-claim` can now immediately replay interrupted mail turns without waiting for stale-claim TTL recovery
 - `agent-mail claims` can now inspect per-agent transport claim receipts when debugging interrupted mail turns
 - `agent-state list-turns` can now inspect recent turn-journal phases when debugging interrupted turns
-- inference is split into four dedicated workers, each owning one model and one Unix socket:
+- all models (local and cloud) are served through the same Unix socket protocol
+- local inference is split into four dedicated workers:
   - `fleet-embed` — `Xenova/bge-m3` (q8) on `embed.sock` — serves `embed`
   - `fleet-rerank` — `onnx-community/bge-reranker-v2-m3-ONNX` (q4) on `rerank.sock` — serves `rerank`
   - `fleet-e2b` — Gemma 4 E2B (q4f16) on `e2b.sock` — serves `summarize`, `choose_retrieval_mode`, `choose_turn_profile`, `decompose_keywords`, `scribe`
   - `fleet-e4b` — Gemma 4 E4B (q4f16) on `e4b.sock` — serves `compact`, `extract_entities`, `hyde`, `scribe`
-- callers connect directly to the model they need via `FLEET_EMBED_SOCKET`, `FLEET_RERANK_SOCKET`, `FLEET_E2B_SOCKET`, `FLEET_E4B_SOCKET`
+- cloud providers are served through four dedicated workers:
+  - `fleet-claude` — Anthropic API on `claude.sock` — serves `turn`
+  - `fleet-gemini` — Google AI API on `gemini.sock` — serves `turn`
+  - `fleet-openai` — OpenAI API on `openai.sock` — serves `turn`
+  - `fleet-openrouter` — OpenRouter API on `openrouter.sock` — serves `turn`
+- callers connect directly to the model they need via `FLEET_PROVIDER_SOCKET` (cloud) or `FLEET_EMBED_SOCKET`, `FLEET_RERANK_SOCKET`, `FLEET_E2B_SOCKET`, `FLEET_E4B_SOCKET` (local)
+- each provider worker manages per-provider rate limits, quotas, and retry logic
 - socket backlog handles implicit queuing — no application-level task queue between callers and workers
 - `agent-memory` refreshes artifacts off the turn path, and `agent-harness` falls back to deterministic recency when those artifacts are unavailable
 - `agent-memory` now records refresh freshness and last error, and stale artifacts trigger background refresh instead of blocking turns

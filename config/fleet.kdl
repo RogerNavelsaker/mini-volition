@@ -10,13 +10,13 @@ layout {
         pane split_direction="horizontal" {
             pane split_direction="vertical" {
                 pane name="CLAUDE" command="bash" {
-                    args "-lc" "AGENT_NAME=claude AGENT_COMMAND='bunx --bun @agentclientprotocol/claude-agent-acp' AGENT_PROMPT_MODE=acp AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_E2B_SOCKET='./runtime/e2b.sock' agent-harness < /dev/null"
+                    args "-lc" "AGENT_NAME=claude AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='./runtime/claude.sock' FLEET_PROVIDER_MODEL='claude-sonnet-4-20250514' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_E2B_SOCKET='./runtime/e2b.sock' FLEET_E4B_SOCKET='./runtime/e4b.sock' agent-harness < /dev/null"
                 }
                 pane name="GEMINI" command="bash" {
-                    args "-lc" "AGENT_NAME=gemini AGENT_COMMAND='/home/rona/.flox/run/x86_64-linux.default.run/bin/gmi --acp --model gemini-3.1-pro-preview' AGENT_PROMPT_MODE=acp AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_E2B_SOCKET='./runtime/e2b.sock' agent-harness < /dev/null"
+                    args "-lc" "AGENT_NAME=gemini AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='./runtime/gemini.sock' FLEET_PROVIDER_MODEL='gemini-2.5-pro' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_E2B_SOCKET='./runtime/e2b.sock' FLEET_E4B_SOCKET='./runtime/e4b.sock' agent-harness < /dev/null"
                 }
                 pane name="CODEX" command="bash" {
-                    args "-lc" "AGENT_NAME=codex AGENT_COMMAND='bunx --bun @zed-industries/codex-acp' AGENT_PROMPT_MODE=acp AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_E2B_SOCKET='./runtime/e2b.sock' agent-harness < /dev/null"
+                    args "-lc" "AGENT_NAME=codex AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='./runtime/openai.sock' FLEET_PROVIDER_MODEL='o3' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_E2B_SOCKET='./runtime/e2b.sock' FLEET_E4B_SOCKET='./runtime/e4b.sock' agent-harness < /dev/null"
                 }
             }
             pane split_direction="vertical" {
@@ -31,6 +31,27 @@ layout {
                 }
                 pane name="OPERATOR" focus=true command="bash" {
                     args "-lc" "AGENT_MAIL_DB='./runtime/agent-mail.db' operator-harness"
+                }
+            }
+        }
+    }
+
+    tab name="providers" {
+        pane split_direction="horizontal" {
+            pane split_direction="vertical" {
+                pane name="CLAUDE-API" command="bash" {
+                    args "-lc" "FLEET_CLAUDE_SOCKET='./runtime/claude.sock' fleet-claude < /dev/null"
+                }
+                pane name="GEMINI-API" command="bash" {
+                    args "-lc" "FLEET_GEMINI_SOCKET='./runtime/gemini.sock' fleet-gemini < /dev/null"
+                }
+            }
+            pane split_direction="vertical" {
+                pane name="OPENAI-API" command="bash" {
+                    args "-lc" "FLEET_OPENAI_SOCKET='./runtime/openai.sock' fleet-openai < /dev/null"
+                }
+                pane name="OPENROUTER-API" command="bash" {
+                    args "-lc" "FLEET_OPENROUTER_SOCKET='./runtime/openrouter.sock' fleet-openrouter < /dev/null"
                 }
             }
         }
