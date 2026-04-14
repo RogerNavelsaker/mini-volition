@@ -4,7 +4,7 @@ import { appendMailArtifact } from "../state-artifacts/lib";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 
-const dbPath = process.env.AGENT_MAIL_DB || "runtime/agent-mail.db";
+const dbPath = process.env.AGENT_MAIL_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-mail.db");
 const db = new Database(dbPath);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -81,7 +81,7 @@ const formatMessage = (msg: FleetMessage) => {
 };
 
 function stateDir(...parts: string[]) {
-  return join(resolve(process.cwd(), process.env.FLEET_STATE_DIR || "state"), ...parts);
+  return join(resolve(process.cwd(), process.env.FLEET_STATE_DIR || join(process.env.META_REPO_ROOT || ".", "state")), ...parts);
 }
 
 function readJsonl(path: string): Array<Record<string, unknown>> {

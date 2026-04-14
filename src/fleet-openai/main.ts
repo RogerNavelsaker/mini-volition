@@ -3,10 +3,10 @@
  * One process, one Unix socket, same protocol as local inference workers.
  */
 import OpenAI from "openai";
-import { resolve } from "path";
+import { join, resolve } from "path";
 import { startProviderServer, type TurnRequest, type TurnResponse } from "../fleet-provider/server";
 
-const socketPath = resolve(process.env.FLEET_OPENAI_SOCKET || "runtime/openai.sock");
+const socketPath = resolve(process.env.FLEET_OPENAI_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/openai.sock"));
 const apiKey = process.env.OPENAI_API_KEY;
 
 if (!apiKey) {

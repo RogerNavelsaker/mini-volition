@@ -1,10 +1,11 @@
+import { join } from "path";
 import { Database } from "bun:sqlite";
 import { ensureLibrarianSchema, knownAgents, maybeQueueExtraction, maybeQueueRepair, queueMaintenanceJob, recoverStaleMaintenanceJobs } from "./maintenance";
 
-const stateDbPath = process.env.AGENT_STATE_DB || "runtime/agent-state.db";
-const memoryDbPath = process.env.AGENT_MEMORY_DB || "runtime/agent-memory.db";
-const jobsDbPath = process.env.AGENT_JOBS_DB || "runtime/agent-jobs.db";
-const librarianDbPath = process.env.FLEET_LIBRARIAN_DB || "runtime/fleet-librarian.db";
+const stateDbPath = process.env.AGENT_STATE_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-state.db");
+const memoryDbPath = process.env.AGENT_MEMORY_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-memory.db");
+const jobsDbPath = process.env.AGENT_JOBS_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-jobs.db");
+const librarianDbPath = process.env.FLEET_LIBRARIAN_DB || join(process.env.META_REPO_ROOT || ".", "runtime/fleet-librarian.db");
 const stateDb = new Database(stateDbPath);
 const memoryDb = new Database(memoryDbPath);
 const jobsDb = new Database(jobsDbPath);

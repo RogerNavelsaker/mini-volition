@@ -24,11 +24,11 @@ import type {
   TraceRow,
 } from "./types";
 
-const dbPath = process.env.AGENT_MEMORY_DB || "runtime/agent-memory.db";
+const dbPath = process.env.AGENT_MEMORY_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-memory.db");
 const db = new Database(dbPath);
-const embedSocket = process.env.FLEET_EMBED_SOCKET || "runtime/embed.sock";
-const e4bSocket = process.env.FLEET_E4B_SOCKET || "runtime/e4b.sock";
-const rerankSocket = process.env.FLEET_RERANK_SOCKET || "runtime/rerank.sock";
+const embedSocket = process.env.FLEET_EMBED_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/embed.sock");
+const e4bSocket = process.env.FLEET_E4B_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/e4b.sock");
+const rerankSocket = process.env.FLEET_RERANK_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/rerank.sock");
 
 const SKILL = `---
 name: agent-memory
@@ -62,7 +62,7 @@ function usage(): never {
 }
 
 function stateDir(...parts: string[]) {
-  return join(resolve(process.cwd(), process.env.FLEET_STATE_DIR || "state"), ...parts);
+  return join(resolve(process.cwd(), process.env.FLEET_STATE_DIR || join(process.env.META_REPO_ROOT || ".", "state")), ...parts);
 }
 
 function readJsonl(path: string): Array<Record<string, unknown>> {
@@ -278,7 +278,7 @@ function requestHyde(query: string): Promise<string | null> {
   });
 }
 
-const e2bSocket = process.env.FLEET_E2B_SOCKET || "runtime/e2b.sock";
+const e2bSocket = process.env.FLEET_E2B_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/e2b.sock");
 
 function requestDecomposeKeywords(text: string): Promise<DecomposeKeywordsResponse | null> {
   return new Promise((resolve) => {

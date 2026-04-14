@@ -12,20 +12,123 @@ import {
 import { resolve, join, dirname } from "path";
 import { appendFleetArtifact } from "../state-artifacts/lib";
 
-// When compiled, import.meta.dir points into /$bunfs. When running from source, use the real .fleet directory.
-const fleetRoot = import.meta.dir.includes("/$bunfs/")
-  ? resolve(dirname(process.execPath), "..")
-  : resolve(import.meta.dir, "../..");
-const repoRoot = resolve(fleetRoot, "..");
+// When compiled, import.meta.dir points into /$bunfs. When running from source, use the real repository root.
+const fleetRoot = process.env.META_REPO_ROOT
+  ? resolve(process.env.META_REPO_ROOT)
+  : (import.meta.dir.includes("/$bunfs/")
+    ? resolve(dirname(process.execPath), "..")
+    : resolve(import.meta.dir, "../.."));
+
 const srcDir = join(fleetRoot, "src");
-const buildDir = join(fleetRoot, "build");
+const binDir = join(fleetRoot, "bin");
 const configDir = join(fleetRoot, "config");
-const runtimeDir = join(fleetRoot, "runtime");
-const stateDir = join(fleetRoot, "state");
+const runtimeDir = resolve(process.env.FLEET_RUNTIME_DIR || join(fleetRoot, "runtime"));
+const stateDir = resolve(process.env.FLEET_STATE_DIR || join(fleetRoot, "state"));
 
 const sessionName = process.env.FLEET_SESSION_NAME || "fleet";
 const layoutPath = join(configDir, "fleet.kdl");
-const binDir = join(fleetRoot, "bin");
+
+interface AgentConfig {
+  name: string;
+  model: string;
+  socket: string;
+}
+
+const DEFAULT_AGENTS: AgentConfig[] = [
+  { name: "claude", model: "claude-sonnet-4-20250514", socket: "claude.sock" },
+  { name: "gemini", model: "gemini-2.5-pro", socket: "gemini.sock" },
+  { name: "codex", model: "o3", socket: "openai.sock" },
+];
+
+function generateKdl(): string {
+  const mailDbPath = resolve(mailDb);
+  const jobsDbPath = resolve(jobsDb);
+  const memoryDbPath = resolve(memoryDb);
+  const stateDbPath = resolve(stateDb);
+  const libDbPath = resolve(librarianDb);
+  const embedSock = resolve(embedSocket);
+  const rerankSock = resolve(rerankSocket);
+  const e2bSock = resolve(e2bSocket);
+  const e4bSock = resolve(e4bSocket);
+
+  const agentPanes = DEFAULT_AGENTS.map(a => `
+                pane name="${a.name.toUpperCase()}" command="bash" {
+                    args "-lc" "AGENT_NAME=${a.name} AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='${resolve(runtimeDir, a.socket)}' FLEET_PROVIDER_MODEL='${a.model}' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='${mailDbPath}' AGENT_JOBS_DB='${jobsDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' FLEET_LIBRARIAN_DB='${libDbPath}' FLEET_EMBED_SOCKET='${embedSock}' FLEET_E2B_SOCKET='${e2bSock}' FLEET_E4B_SOCKET='${e4bSock}' agent-harness < /dev/null"
+                }`).join("");
+
+  return `layout {
+    default_tab_template {
+        children
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+
+    tab name="agents" {
+        pane split_direction="horizontal" {
+            pane split_direction="vertical" {${agentPanes}
+            }
+            pane split_direction="vertical" {
+                pane name="TOWN SQUARE" command="bash" {
+                    args "-lc" "AGENT_MAIL_DB='${mailDbPath}' agent-mail tail public < /dev/null"
+                }
+                pane name="DIGEST" command="bash" {
+                    args "-lc" "AGENT_MAIL_DB='${mailDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' AGENT_MAIL_BIN='agent-mail' FLEET_E2B_SOCKET='${e2bSock}' fleet-digest < /dev/null"
+                }
+                pane name="MEMORY" command="bash" {
+                    args "-lc" "AGENT_JOBS_DB='${jobsDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' FLEET_LIBRARIAN_DB='${libDbPath}' AGENT_MEMORY_BIN='agent-memory' fleet-librarian < /dev/null"
+                }
+                pane name="OPERATOR" focus=true command="bash" {
+                    args "-lc" "AGENT_MAIL_DB='${mailDbPath}' operator-harness"
+                }
+            }
+        }
+    }
+
+    tab name="providers" {
+        pane split_direction="horizontal" {
+            pane split_direction="vertical" {
+                pane name="CLAUDE-API" command="bash" {
+                    args "-lc" "FLEET_CLAUDE_SOCKET='${resolve(runtimeDir, "claude.sock")}' fleet-claude < /dev/null"
+                }
+                pane name="GEMINI-API" command="bash" {
+                    args "-lc" "FLEET_GEMINI_SOCKET='${resolve(runtimeDir, "gemini.sock")}' fleet-gemini < /dev/null"
+                }
+            }
+            pane split_direction="vertical" {
+                pane name="OPENAI-API" command="bash" {
+                    args "-lc" "FLEET_OPENAI_SOCKET='${resolve(runtimeDir, "openai.sock")}' fleet-openai < /dev/null"
+                }
+                pane name="OPENROUTER-API" command="bash" {
+                    args "-lc" "FLEET_OPENROUTER_SOCKET='${resolve(runtimeDir, "openrouter.sock")}' fleet-openrouter < /dev/null"
+                }
+            }
+        }
+    }
+
+    tab name="inference" {
+        pane split_direction="horizontal" {
+            pane split_direction="vertical" {
+                pane name="EMBED" command="bash" {
+                    args "-lc" "FLEET_EMBED_SOCKET='${embedSock}' fleet-embed < /dev/null"
+                }
+                pane name="RERANK" command="bash" {
+                    args "-lc" "FLEET_RERANK_SOCKET='${rerankSock}' fleet-rerank < /dev/null"
+                }
+            }
+            pane split_direction="vertical" {
+                pane name="E2B" command="bash" {
+                    args "-lc" "FLEET_E2B_SOCKET='${e2bSock}' fleet-e2b < /dev/null"
+                }
+                pane name="E4B" command="bash" {
+                    args "-lc" "FLEET_E4B_SOCKET='${e4bSock}' fleet-e4b < /dev/null"
+                }
+            }
+        }
+    }
+}
+`;
+}
 
 const mailSrc = join(srcDir, "agent-mail", "main.ts");
 const harnessSrc = join(srcDir, "agent-harness", "main.ts");
@@ -84,7 +187,7 @@ const geminiBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/gmi";
 const codexBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/cod";
 
 function usage(): never {
-  console.error("Usage: bin/fleet <start|attach|stop|down|restart|status|up|governor-status|governor-bump|governor-force|rebuild-governor|verify-governor>");
+  console.error("Usage: bin/fleet <start|attach|detach|stop|down|restart|status|up|governor-status|governor-bump|governor-force|rebuild-governor|verify-governor>");
   process.exit(64);
 }
 
@@ -362,8 +465,6 @@ function governorBump(agent: string, windowSec: number, turnLimit: number, reaso
 function startSession() {
   requireCmd("zellij");
 
-  process.env.PATH = `${binDir}:${process.env.PATH}`;
-
   if (sessionRunning()) {
     console.log(`fleet session '${sessionName}' is already running`);
     return;
@@ -373,9 +474,14 @@ function startSession() {
     spawnSync(["zellij", "delete-session", sessionName]);
   }
 
+  const kdl = generateKdl();
+  const tmpLayout = join(runtimeDir, "fleet-dynamic.kdl");
+  ensureRuntimeDir();
+  writeFileSync(tmpLayout, kdl);
+
   const child = spawn(
-    ["zellij", "--new-session-with-layout", layoutPath, "--session", sessionName],
-    { cwd: repoRoot, stdout: "ignore", stderr: "ignore", stdin: "ignore" },
+    ["zellij", "--new-session-with-layout", tmpLayout, "--session", sessionName],
+    { cwd: fleetRoot, stdout: "ignore", stderr: "ignore", stdin: "ignore" },
   );
   child.unref();
 
@@ -404,6 +510,16 @@ function attachSession() {
     stderr: "inherit",
   });
   process.exit(result.exitCode);
+}
+
+function detachSession() {
+  requireCmd("zellij");
+  if (!sessionRunning()) {
+    console.log(`fleet session '${sessionName}' is not running`);
+    return;
+  }
+  spawnSync(["zellij", "action", "--session", sessionName, "detach"]);
+  console.log(`fleet session '${sessionName}' detached`);
 }
 
 function stopSession() {
@@ -479,6 +595,9 @@ switch (process.argv[2]) {
     break;
   case "attach":
     attachSession();
+    break;
+  case "detach":
+    detachSession();
     break;
   case "stop":
     stopSession();

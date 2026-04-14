@@ -1,3 +1,4 @@
+import { join } from "path";
 import { Database } from "bun:sqlite";
 import { createConnection } from "net";
 import { ensureSchema as ensureMemorySchema } from "../agent-memory/schema";
@@ -24,10 +25,10 @@ if (Bun.argv[2] === "skill") {
   process.exit(0);
 }
 
-const commsDbPath = process.env.AGENT_MAIL_DB || "runtime/agent-mail.db";
-const memoryDbPath = process.env.AGENT_MEMORY_DB || "runtime/agent-memory.db";
-const stateDbPath = process.env.AGENT_STATE_DB || "runtime/agent-state.db";
-const e2bSocket = process.env.FLEET_E2B_SOCKET || "runtime/e2b.sock";
+const commsDbPath = process.env.AGENT_MAIL_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-mail.db");
+const memoryDbPath = process.env.AGENT_MEMORY_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-memory.db");
+const stateDbPath = process.env.AGENT_STATE_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-state.db");
+const e2bSocket = process.env.FLEET_E2B_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/e2b.sock");
 const commsDb = new Database(commsDbPath);
 const memoryDb = new Database(memoryDbPath);
 const stateDb = new Database(stateDbPath);

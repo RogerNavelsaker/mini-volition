@@ -1,5 +1,7 @@
+import { join } from "path";
 import { Database } from "bun:sqlite";
 import { createInterface } from "readline";
+import { spawnSync } from "child_process";
 import { ensureMailSchema } from "../agent-mail/core";
 
 const SKILL = `---
@@ -23,15 +25,15 @@ operator-harness skill  # print this skill document
 operator-harness        # start the REPL
 \`\`\`
 
-Type \`<recipient>: <message>\` for direct messages, or \`all: <message>\` for Town Square broadcasts:
+Type \`<recipient>: <message>\` for direct messages, or \`all: <message>\` for Town Square broadcasts.
 
-\`\`\`
-> claude: review the auth module
-> all: status check
-> codex: implement the parser
-\`\`\`
+### Slash Commands
 
-Incoming replies from agents are displayed inline as they arrive.
+- \`/status\` — show fleet runtime status
+- \`/detach\` — detach the Zellij session
+- \`/stop\`   — kill the Zellij session
+- \`/down\`   — stop and wipe databases/sockets
+- \`/help\`   — show help
 
 ## Sends on
 
@@ -44,7 +46,7 @@ if (Bun.argv[2] === "skill") {
   process.exit(0);
 }
 
-const dbPath = process.env.AGENT_MAIL_DB || "runtime/agent-mail.db";
+const dbPath = process.env.AGENT_MAIL_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-mail.db");
 const db = new Database(dbPath);
 db.exec("PRAGMA busy_timeout = 5000;");
 db.exec("PRAGMA journal_mode = WAL;");
@@ -86,6 +88,7 @@ const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
+const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
 
 function formatTime(ts: string): string {
   const d = new Date(ts.endsWith("Z") ? ts : ts + "Z");
@@ -104,6 +107,18 @@ function send(recipient: string, layer: string, body: string) {
       [recipient, layer, sender, body],
     ),
   );
+}
+
+function runFleet(cmd: string) {
+  console.log(dim(`Executing: fleet ${cmd}...`));
+  const res = spawnSync("fleet", [cmd], { stdio: "inherit" });
+  if (res.status !== 0) {
+    // If 'fleet' is not in path, try relative bin
+    const relRes = spawnSync("./bin/fleet", [cmd], { stdio: "inherit" });
+    if (relRes.status !== 0 && relRes.error) {
+       console.log(yellow(`Fleet command failed. Ensure 'fleet' is in your PATH.`));
+    }
+  }
 }
 
 // poll for messages addressed to operator
@@ -142,7 +157,8 @@ const rl = createInterface({
   prompt: `${bold(">")} `,
 });
 
-console.log(dim("Fleet operator CLI. Send: <agent>: <message>  |  Broadcast: all: <message>  |  Ctrl-C to exit"));
+console.log(dim("Fleet operator CLI."));
+console.log(dim("Commands: <agent>: <message> | /status | /detach | /stop | /down | /help"));
 rl.prompt();
 
 rl.on("line", async (line: string) => {
@@ -152,9 +168,36 @@ rl.on("line", async (line: string) => {
     return;
   }
 
+  // Handle slash commands
+  if (trimmed.startsWith("/")) {
+    const [cmd] = trimmed.slice(1).split(" ");
+    switch (cmd.toLowerCase()) {
+      case "status":
+        runFleet("status");
+        break;
+      case "detach":
+        runFleet("detach");
+        break;
+      case "stop":
+        runFleet("stop");
+        break;
+      case "down":
+        runFleet("down");
+        break;
+      case "help":
+        console.log(dim("Available commands: /status, /detach, /stop, /down, /help"));
+        console.log(dim("Messaging: <agent>: <message>  (e.g., claude: hello)"));
+        break;
+      default:
+        console.log(yellow(`Unknown command: /${cmd}. Type /help for assistance.`));
+    }
+    rl.prompt();
+    return;
+  }
+
   const match = trimmed.match(/^(\w+):\s*(.+)$/s);
   if (!match) {
-    console.log(dim("Format: <recipient>: <message>"));
+    console.log(dim("Format: <recipient>: <message>  or  /<command>"));
     rl.prompt();
     return;
   }

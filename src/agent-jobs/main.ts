@@ -4,7 +4,7 @@ import { appendJobArtifact } from "../state-artifacts/lib";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 
-const dbPath = process.env.AGENT_JOBS_DB || "runtime/agent-jobs.db";
+const dbPath = process.env.AGENT_JOBS_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-jobs.db");
 const db = new Database(dbPath);
 
 const SKILL = `---
@@ -36,7 +36,7 @@ function usage(): never {
 }
 
 function stateDir(...parts: string[]) {
-  return join(resolve(process.cwd(), process.env.FLEET_STATE_DIR || "state"), ...parts);
+  return join(resolve(process.cwd(), process.env.FLEET_STATE_DIR || join(process.env.META_REPO_ROOT || ".", "state")), ...parts);
 }
 
 function readJsonl(path: string): Array<Record<string, unknown>> {

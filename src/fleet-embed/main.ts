@@ -1,8 +1,8 @@
-import { resolve, dirname } from "path";
+import { join, resolve, dirname } from "path";
 import { env, pipeline } from "@huggingface/transformers";
 import { startInferenceServer } from "../fleet-inference/server";
 
-const socketPath = resolve(process.env.FLEET_EMBED_SOCKET || "runtime/embed.sock");
+const socketPath = resolve(process.env.FLEET_EMBED_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/embed.sock"));
 const modelId = process.env.FLEET_EMBED_MODEL || "Xenova/bge-m3";
 const modelDType = process.env.FLEET_EMBED_DTYPE || "q8";
 const cacheDir = process.env.FLEET_INFERENCE_CACHE_DIR || `${dirname(socketPath)}/.cache/transformers`;

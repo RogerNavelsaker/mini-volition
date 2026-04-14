@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync } from "fs";
 import { dirname, join, resolve } from "path";
 
 function stateRoot(): string {
-  return resolve(process.cwd(), process.env.FLEET_STATE_DIR || "state");
+  return resolve(process.cwd(), process.env.FLEET_STATE_DIR || join(process.env.META_REPO_ROOT || ".", "state"));
 }
 
 function ensureParent(path: string) {

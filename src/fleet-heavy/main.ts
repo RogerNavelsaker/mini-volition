@@ -1,4 +1,4 @@
-import { resolve, dirname } from "path";
+import { join, resolve, dirname } from "path";
 import {
   AutoProcessor,
   Gemma4ForConditionalGeneration,
@@ -6,7 +6,7 @@ import {
 } from "@huggingface/transformers";
 import { startInferenceServer } from "../fleet-inference/server";
 
-const socketPath = resolve(process.env.FLEET_HEAVY_SOCKET || "runtime/heavy.sock");
+const socketPath = resolve(process.env.FLEET_HEAVY_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/heavy.sock"));
 const modelId = process.env.FLEET_HEAVY_MODEL || "onnx-community/gemma-4-E4B-it-ONNX";
 const modelDType = process.env.FLEET_HEAVY_DTYPE || "q4f16";
 const maxNewTokens = Number(process.env.FLEET_HEAVY_MAX_TOKENS || "320");

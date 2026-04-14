@@ -4,10 +4,10 @@ import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 import { appendActionArtifact, appendReviewArtifact, appendRuntimeArtifact, appendTurnArtifact } from "../state-artifacts/lib";
 
-const dbPath = process.env.AGENT_STATE_DB || "runtime/agent-state.db";
+const dbPath = process.env.AGENT_STATE_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-state.db");
 const db = new Database(dbPath);
-const jobsDbPath = process.env.AGENT_JOBS_DB || "runtime/agent-jobs.db";
-const mailDbPath = process.env.AGENT_MAIL_DB || "runtime/agent-mail.db";
+const jobsDbPath = process.env.AGENT_JOBS_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-jobs.db");
+const mailDbPath = process.env.AGENT_MAIL_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-mail.db");
 const jobsBin = process.env.AGENT_JOBS_BIN || "agent-jobs";
 const mailBin = process.env.AGENT_MAIL_BIN || "agent-mail";
 
@@ -40,7 +40,7 @@ function usage(): never {
 }
 
 function stateDir(...parts: string[]) {
-  return join(resolve(process.cwd(), process.env.FLEET_STATE_DIR || "state"), ...parts);
+  return join(resolve(process.cwd(), process.env.FLEET_STATE_DIR || join(process.env.META_REPO_ROOT || ".", "state")), ...parts);
 }
 
 function readJsonl(path: string): Array<Record<string, unknown>> {

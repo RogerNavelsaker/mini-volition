@@ -1,4 +1,4 @@
-import { resolve, dirname } from "path";
+import { join, resolve, dirname } from "path";
 import {
   AutoModelForSequenceClassification,
   AutoTokenizer,
@@ -6,7 +6,7 @@ import {
 } from "@huggingface/transformers";
 import { startInferenceServer } from "../fleet-inference/server";
 
-const socketPath = resolve(process.env.FLEET_RERANK_SOCKET || "runtime/rerank.sock");
+const socketPath = resolve(process.env.FLEET_RERANK_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/rerank.sock"));
 const modelId = process.env.FLEET_RERANK_MODEL || "onnx-community/bge-reranker-v2-m3-ONNX";
 const modelDType = process.env.FLEET_RERANK_DTYPE || "q4";
 const cacheDir = process.env.FLEET_INFERENCE_CACHE_DIR || `${dirname(socketPath)}/.cache/transformers`;

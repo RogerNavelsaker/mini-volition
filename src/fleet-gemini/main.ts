@@ -3,10 +3,10 @@
  * One process, one Unix socket, same protocol as local inference workers.
  */
 import { GoogleGenAI } from "@google/genai";
-import { resolve } from "path";
+import { join, resolve } from "path";
 import { startProviderServer, type TurnRequest, type TurnResponse } from "../fleet-provider/server";
 
-const socketPath = resolve(process.env.FLEET_GEMINI_SOCKET || "runtime/gemini.sock");
+const socketPath = resolve(process.env.FLEET_GEMINI_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/gemini.sock"));
 const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
 
 if (!apiKey) {
