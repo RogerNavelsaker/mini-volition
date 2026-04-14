@@ -1,0 +1,9 @@
+{
+  "name": "fleet-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@huggingface/transformers": "next",
+    "sharp": "^0.34.5"
+  }
+}

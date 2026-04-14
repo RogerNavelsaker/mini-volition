@@ -1,0 +1,7 @@
+runtime/
+state/
+build/node_modules/
+build/*.mjs
+zellij-*/
+bin/
+scratchpads/
