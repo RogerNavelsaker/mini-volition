@@ -26,8 +26,8 @@ const turnStaleMs = Math.max(30_000, parseInt(process.env.FLEET_TURN_STALE_MS ||
 const turnTimeoutMs = Math.max(15_000, parseInt(process.env.FLEET_TURN_TIMEOUT_MS || "120000", 10) || 120000);
 const memoryBin = process.env.AGENT_MEMORY_BIN || "agent-memory";
 const embedSocket = process.env.FLEET_EMBED_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/embed.sock");
-const e2bSocket = process.env.FLEET_E2B_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/e2b.sock");
-const e4bSocket = process.env.FLEET_E4B_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/e4b.sock");
+const lightSocket = process.env.FLEET_LIGHT_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/light.sock");
+const heavySocket = process.env.FLEET_HEAVY_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/heavy.sock");
 const memoryDb = new Database(memoryDbPath);
 const stateDb = new Database(stateDbPath);
 const librarianDb = new Database(librarianDbPath);
@@ -982,7 +982,7 @@ function requestInferenceEmbed(text: string): Promise<number[] | null> {
 
 function requestInferenceRetrievalMode(source: WakeSource, burst: IncomingBurst): Promise<RetrievalMode | null> {
   return new Promise((resolve) => {
-    const socket = createConnection(e2bSocket);
+    const socket = createConnection(lightSocket);
     let buffer = "";
     let settled = false;
     const finish = (value: RetrievalMode | null) => {
@@ -1070,7 +1070,7 @@ function profileConfig(profile: TurnProfile): { model: string | null; reasoning_
 
 function requestInferenceTurnProfile(source: WakeSource, burst: IncomingBurst): Promise<TurnProfile | null> {
   return new Promise((resolve) => {
-    const socket = createConnection(e2bSocket);
+    const socket = createConnection(lightSocket);
     let buffer = "";
     let settled = false;
     const finish = (value: TurnProfile | null) => {
@@ -1110,7 +1110,7 @@ function requestInferenceTurnProfile(source: WakeSource, burst: IncomingBurst): 
 
 function requestScribe(scribeName: string, task: string): Promise<string | null> {
   const lightScribes = ["scribe", "milo"];
-  const socketPath = lightScribes.includes(scribeName) ? e2bSocket : e4bSocket;
+  const socketPath = lightScribes.includes(scribeName) ? lightSocket : heavySocket;
   return new Promise((resolve) => {
     const socket = createConnection(socketPath);
     let buffer = "";

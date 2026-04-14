@@ -10,12 +10,12 @@ Tiered durability (FTS5 + Vector hybrid).
 
 ## §Retrieval
 - **τHybrid**: FTS5 + Vector search.
-- **HyDE**: `hyde` (fleet-e4b) → hypothetical answer embedding.
-- **Decomposition**: `decompose_keywords` (fleet-e2b) → HL/LL FTS fusion via RRF.
+- **HyDE**: `hyde` (fleet-heavy) → hypothetical answer embedding.
+- **Decomposition**: `decompose_keywords` (fleet-light) → HL/LL FTS fusion via RRF.
 - **Reranking**: `fleet-rerank` top-k filtering.
 
 ## §Upkeep
 - **Refresh**: Async, non-blocking staleness check.
 - **Reinforce/Decay**: Ebbinghaus-style curve (recall strength vs. unused decay).
 - **Compaction**: `librarian` jobs → structured facts, patterns, risks.
-- **Extraction**: `fleet-e4b` → typed entity/relation triples at ingest.
+- **Extraction**: `fleet-heavy` → typed entity/relation triples at ingest.

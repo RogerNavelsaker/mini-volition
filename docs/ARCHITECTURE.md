@@ -4,7 +4,7 @@ Fleet architecture: hotpath (SQLite) + durable (JSONL/TOML).
 ## §Components
 - **τHarness**: Execution loop, wake selection, context assembly, recovery.
 - **τThinker**: ACP cloud agents (Gemini/Claude/OpenAI).
-- **τScribe**: Gemma 4 offload (E2B/E4B).
+- **τScribe**: Local model offload (light/heavy).
 - **τMuscle**: Inference workers.
 - **τLibrarian**: Async upkeep (compaction, entity extraction).
 

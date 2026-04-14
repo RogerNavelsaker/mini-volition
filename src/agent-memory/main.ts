@@ -27,7 +27,7 @@ import type {
 const dbPath = process.env.AGENT_MEMORY_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-memory.db");
 const db = new Database(dbPath);
 const embedSocket = process.env.FLEET_EMBED_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/embed.sock");
-const e4bSocket = process.env.FLEET_E4B_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/e4b.sock");
+const heavySocket = process.env.FLEET_HEAVY_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/heavy.sock");
 const rerankSocket = process.env.FLEET_RERANK_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/rerank.sock");
 
 const SKILL = `---
@@ -218,7 +218,7 @@ function requestRerank(query: string, passages: string[]): Promise<RerankResult[
 
 function requestExtractEntities(text: string): Promise<ExtractEntitiesResponse | null> {
   return new Promise((resolve) => {
-    const socket = createConnection(e4bSocket);
+    const socket = createConnection(heavySocket);
     let buffer = "";
     let settled = false;
     const finish = (value: ExtractEntitiesResponse | null) => {
@@ -249,7 +249,7 @@ function requestExtractEntities(text: string): Promise<ExtractEntitiesResponse |
 
 function requestHyde(query: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const socket = createConnection(e4bSocket);
+    const socket = createConnection(heavySocket);
     let buffer = "";
     let settled = false;
     const finish = (value: string | null) => {
@@ -278,11 +278,11 @@ function requestHyde(query: string): Promise<string | null> {
   });
 }
 
-const e2bSocket = process.env.FLEET_E2B_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/e2b.sock");
+const lightSocket = process.env.FLEET_LIGHT_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/light.sock");
 
 function requestDecomposeKeywords(text: string): Promise<DecomposeKeywordsResponse | null> {
   return new Promise((resolve) => {
-    const socket = createConnection(e2bSocket);
+    const socket = createConnection(lightSocket);
     let buffer = "";
     let settled = false;
     const finish = (value: DecomposeKeywordsResponse | null) => {
@@ -907,7 +907,7 @@ async function compact(agentName: string) {
         }
       } catch {}
     }
-    // Extract entities via LLM (fleet-e4b), fall back to regex deriveFacts
+    // Extract entities via LLM (fleet-heavy), fall back to regex deriveFacts
     const createdByKind = new Map(createdItems.map((item) => [`${item.item_kind}:${item.content}`, item.id]));
     const extractionText = createdItems.map((item) => `${item.item_kind}: ${item.content}`).join("\n");
     const extracted = await requestExtractEntities(extractionText);

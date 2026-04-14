@@ -11,7 +11,7 @@ Mini-Volition: local-first, autonomous, multi-agent runtime.
 
 ## §SplitBrain
 - **τProfile**: Harness-assigned `light|full|max` per turn.
-- **τOffload**: Dedicated CPU-bound socket workers (`fleet-embed`, `fleet-rerank`, `fleet-e2b`, `fleet-e4b`).
+- **τOffload**: Dedicated CPU-bound socket workers (`fleet-embed`, `fleet-rerank`, `fleet-light`, `fleet-heavy`).
 - **τScribe**: Fire-and-forget sub-task delegation.
 
 ## §Orientation

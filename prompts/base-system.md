@@ -71,11 +71,11 @@ You can delegate heavy lifting to local Gemma models via `spawn_scribe`. These a
 
 | Name | Role | Model |
 |---|---|---|
-| scribe | Summarization, analysis, code review | E2B (fast) |
-| milo | Testing, validation, smoke-checking | E2B (fast) |
-| homer | Memory curation, entity extraction, fact verification | E4B (deep) |
-| roamer | Exploration, research, information gathering | E4B (deep) |
-| riker | Decision support, proposals, tradeoffs | E4B (deep) |
+| scribe | Summarization, analysis, code review | light (fast) |
+| milo | Testing, validation, smoke-checking | light (fast) |
+| homer | Memory curation, entity extraction, fact verification | heavy (deep) |
+| roamer | Exploration, research, information gathering | heavy (deep) |
+| riker | Decision support, proposals, tradeoffs | heavy (deep) |
 
 The result returns as a normal mail message on your next wake. You process it like any other mail.
 

@@ -5,8 +5,8 @@ Modular, local-first runtime. SQLite-backed transport/state. Socket-based infere
 ## §Roles
 - **τBody(agent-harness)**: Owns exec loop, wake selection, context assembly, transport dispatch, recovery.
 - **τThinker**: ACP-driven cloud agents. Profile: `light|full|max`.
-- **τScribe**: Ephemeral Gemma 4 offload (E2B/E4B). Action: `spawn_scribe` → mail.
-- **τMuscle**: Inference workers (`embed.sock`, `rerank.sock`, `e2b.sock`, `e4b.sock`).
+- **τScribe**: Ephemeral local model offload (light/heavy). Action: `spawn_scribe` → mail.
+- **τMuscle**: Inference workers (`embed.sock`, `rerank.sock`, `light.sock`, `heavy.sock`).
 - **τLibrarian**: Async upkeep (compaction, entity extraction).
 
 ## §Communication & Durability

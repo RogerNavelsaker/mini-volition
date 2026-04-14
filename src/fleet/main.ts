@@ -74,8 +74,8 @@ const fleetDb = join(runtimeDir, "fleet.db");
 const librarianDb = join(runtimeDir, "fleet-librarian.db");
 const embedSocket = join(runtimeDir, "embed.sock");
 const rerankSocket = join(runtimeDir, "rerank.sock");
-const e2bSocket = join(runtimeDir, "e2b.sock");
-const e4bSocket = join(runtimeDir, "e4b.sock");
+const lightSocket = join(runtimeDir, "light.sock");
+const heavySocket = join(runtimeDir, "heavy.sock");
 
 const claudeBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/cc";
 const geminiBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/gmi";
@@ -91,8 +91,8 @@ const digestBin = join(binDir, "fleet-digest");
 const librarianBin = join(binDir, "fleet-librarian");
 const embedBin = join(binDir, "fleet-embed");
 const rerankBin = join(binDir, "fleet-rerank");
-const e2bBin = join(binDir, "fleet-e2b");
-const e4bBin = join(binDir, "fleet-e4b");
+const lightBin = join(binDir, "fleet-light");
+const heavyBin = join(binDir, "fleet-heavy");
 
 function generateKdl(): string {
   const config = loadConfig();
@@ -103,12 +103,12 @@ function generateKdl(): string {
   const libDbPath = resolve(librarianDb);
   const embedSock = resolve(embedSocket);
   const rerankSock = resolve(rerankSocket);
-  const e2bSock = resolve(e2bSocket);
-  const e4bSock = resolve(e4bSocket);
+  const lightSock = resolve(lightSocket);
+  const heavySock = resolve(heavySocket);
 
   const agentPanes = config.agents.map(a => `
                 pane name="${a.name.toUpperCase()}" command="bash" {
-                    args "-lc" "AGENT_NAME=${a.name} AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='${resolve(runtimeDir, a.socket)}' FLEET_PROVIDER_MODEL='${a.model}' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='${mailDbPath}' AGENT_JOBS_DB='${jobsDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' FLEET_LIBRARIAN_DB='${libDbPath}' FLEET_EMBED_SOCKET='${embedSock}' FLEET_E2B_SOCKET='${e2bSock}' FLEET_E4B_SOCKET='${e4bSock}' agent-harness < /dev/null"
+                    args "-lc" "AGENT_NAME=${a.name} AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='${resolve(runtimeDir, a.socket)}' FLEET_PROVIDER_MODEL='${a.model}' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='${mailDbPath}' AGENT_JOBS_DB='${jobsDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' FLEET_LIBRARIAN_DB='${libDbPath}' FLEET_EMBED_SOCKET='${embedSock}' FLEET_LIGHT_SOCKET='${lightSock}' FLEET_HEAVY_SOCKET='${heavySock}' agent-harness < /dev/null"
                 }`).join("");
 
   return `layout {
@@ -128,7 +128,7 @@ function generateKdl(): string {
                     args "-lc" "AGENT_MAIL_DB='${mailDbPath}' agent-mail tail public < /dev/null"
                 }
                 pane name="DIGEST" command="bash" {
-                    args "-lc" "AGENT_MAIL_DB='${mailDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' AGENT_MAIL_BIN='agent-mail' FLEET_E2B_SOCKET='${e2bSock}' fleet-digest < /dev/null"
+                    args "-lc" "AGENT_MAIL_DB='${mailDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' AGENT_MAIL_BIN='agent-mail' FLEET_LIGHT_SOCKET='${lightSock}' fleet-digest < /dev/null"
                 }
                 pane name="MEMORY" command="bash" {
                     args "-lc" "AGENT_JOBS_DB='${jobsDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' FLEET_LIBRARIAN_DB='${libDbPath}' AGENT_MEMORY_BIN='agent-memory' fleet-librarian < /dev/null"
@@ -172,11 +172,11 @@ function generateKdl(): string {
                 }
             }
             pane split_direction="vertical" {
-                pane name="E2B" command="bash" {
-                    args "-lc" "FLEET_E2B_SOCKET='${e2bSock}' fleet-e2b < /dev/null"
+                pane name="LIGHT" command="bash" {
+                    args "-lc" "FLEET_LIGHT_SOCKET='${lightSock}' fleet-light < /dev/null"
                 }
-                pane name="E4B" command="bash" {
-                    args "-lc" "FLEET_E4B_SOCKET='${e4bSock}' fleet-e4b < /dev/null"
+                pane name="HEAVY" command="bash" {
+                    args "-lc" "FLEET_HEAVY_SOCKET='${heavySock}' fleet-heavy < /dev/null"
                 }
             }
         }
@@ -216,7 +216,7 @@ function terminusSession() {
       } catch {}
     }
   }
-  for (const sock of [embedSocket, rerankSocket, e2bSocket, e4bSocket, 
+  for (const sock of [embedSocket, rerankSocket, lightSocket, heavySocket, 
                      join(runtimeDir, "claude.sock"), join(runtimeDir, "gemini.sock"),
                      join(runtimeDir, "openai.sock"), join(runtimeDir, "openrouter.sock")]) {
     try {
@@ -590,8 +590,8 @@ function showStatus() {
   console.log(`fleet-librarian-bin: ${isExecutable(librarianBin) ? "ready" : "missing"} ${librarianBin}`);
   console.log(`fleet-embed-bin: ${isExecutable(embedBin) ? "ready" : "missing"} ${embedBin}`);
   console.log(`fleet-rerank-bin: ${isExecutable(rerankBin) ? "ready" : "missing"} ${rerankBin}`);
-  console.log(`fleet-e2b-bin: ${isExecutable(e2bBin) ? "ready" : "missing"} ${e2bBin}`);
-  console.log(`fleet-e4b-bin: ${isExecutable(e4bBin) ? "ready" : "missing"} ${e4bBin}`);
+  console.log(`fleet-light-bin: ${isExecutable(lightBin) ? "ready" : "missing"} ${lightBin}`);
+  console.log(`fleet-heavy-bin: ${isExecutable(heavyBin) ? "ready" : "missing"} ${heavyBin}`);
   console.log(`claude-bin: ${isExecutable(claudeBin) ? "ready" : "missing"} ${claudeBin}`);
   console.log(`gemini-bin: ${isExecutable(geminiBin) ? "ready" : "missing"} ${geminiBin}`);
   console.log(`codex-bin: ${isExecutable(codexBin) ? "ready" : "missing"} ${codexBin}`);
@@ -603,8 +603,8 @@ function showStatus() {
   console.log(`fleet-librarian-db: ${librarianDb}`);
   console.log(`embed-socket: ${embedSocket}`);
   console.log(`rerank-socket: ${rerankSocket}`);
-  console.log(`e2b-socket: ${e2bSocket}`);
-  console.log(`e4b-socket: ${e4bSocket}`);
+  console.log(`light-socket: ${lightSocket}`);
+  console.log(`heavy-socket: ${heavySocket}`);
   console.log(`state-dir: ${stateDir}`);
 }
 

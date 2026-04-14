@@ -25,5 +25,5 @@
 - Initial transport via focused SQLite databases (mail, jobs, state, memory, governor, librarian).
 - Split-brain model profile selection (light|full|max) per turn.
 - Harness-owned turn loop, envelope validation, and action dispatch.
-- Implementation of one-process-per-model for inference workers (embed, rerank, e2b, e4b).
+- Implementation of one-process-per-model for inference workers (embed, rerank, light, heavy).
 - LLM entity extraction at ingest, dual-keyword decomposition, and HyDE query expansion.

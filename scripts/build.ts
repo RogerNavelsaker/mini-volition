@@ -44,7 +44,7 @@ for (const [mod, name] of coreModules) {
 }
 
 // 2. Build inference and provider workers (Bundles + Wrappers)
-// Inference workers: embed, rerank, light, heavy (previously e2b, e4b)
+// Inference workers: embed, rerank, light, heavy
 const inferenceWorkers = [
   [join(srcDir, "fleet-embed", "main.ts"), "fleet-embed"],
   [join(srcDir, "fleet-rerank", "main.ts"), "fleet-rerank"],

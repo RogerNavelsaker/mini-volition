@@ -28,7 +28,7 @@ if (Bun.argv[2] === "skill") {
 const commsDbPath = process.env.AGENT_MAIL_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-mail.db");
 const memoryDbPath = process.env.AGENT_MEMORY_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-memory.db");
 const stateDbPath = process.env.AGENT_STATE_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-state.db");
-const e2bSocket = process.env.FLEET_E2B_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/e2b.sock");
+const lightSocket = process.env.FLEET_LIGHT_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/light.sock");
 const commsDb = new Database(commsDbPath);
 const memoryDb = new Database(memoryDbPath);
 const stateDb = new Database(stateDbPath);
@@ -129,7 +129,7 @@ function heuristicSummary(messages: FleetMessage[]): DigestSummary {
 
 function requestSummary(messages: FleetMessage[]): Promise<DigestSummary> {
   return new Promise((resolve, reject) => {
-    const socket = createConnection(e2bSocket);
+    const socket = createConnection(lightSocket);
     let buffer = "";
 
     socket.on("connect", () => {
@@ -228,7 +228,7 @@ async function main() {
   }
 
   setServiceState("idle", "awaiting_public_burst", "startup");
-  console.log(`[DIGEST] Service started. Listening for public bursts via ${e2bSocket}`);
+  console.log(`[DIGEST] Service started. Listening for public bursts via ${lightSocket}`);
 
   while (true) {
     const newMessages = runSql("SELECT * FROM fleet_comms WHERE layer = 'public' AND id > ? ORDER BY id ASC", lastProcessedId.toString()) as FleetMessage[];

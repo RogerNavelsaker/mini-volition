@@ -10,13 +10,13 @@ layout {
         pane split_direction="horizontal" {
             pane split_direction="vertical" {
                 pane name="CLAUDE" command="bash" {
-                    args "-lc" "AGENT_NAME=claude AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='./runtime/claude.sock' FLEET_PROVIDER_MODEL='claude-sonnet-4-20250514' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_E2B_SOCKET='./runtime/e2b.sock' FLEET_E4B_SOCKET='./runtime/e4b.sock' agent-harness < /dev/null"
+                    args "-lc" "AGENT_NAME=claude AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='./runtime/claude.sock' FLEET_PROVIDER_MODEL='claude-sonnet-4-20250514' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_LIGHT_SOCKET='./runtime/light.sock' FLEET_HEAVY_SOCKET='./runtime/heavy.sock' agent-harness < /dev/null"
                 }
                 pane name="GEMINI" command="bash" {
-                    args "-lc" "AGENT_NAME=gemini AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='./runtime/gemini.sock' FLEET_PROVIDER_MODEL='gemini-2.5-pro' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_E2B_SOCKET='./runtime/e2b.sock' FLEET_E4B_SOCKET='./runtime/e4b.sock' agent-harness < /dev/null"
+                    args "-lc" "AGENT_NAME=gemini AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='./runtime/gemini.sock' FLEET_PROVIDER_MODEL='gemini-2.5-pro' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_LIGHT_SOCKET='./runtime/light.sock' FLEET_HEAVY_SOCKET='./runtime/heavy.sock' agent-harness < /dev/null"
                 }
                 pane name="CODEX" command="bash" {
-                    args "-lc" "AGENT_NAME=codex AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='./runtime/openai.sock' FLEET_PROVIDER_MODEL='o3' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_E2B_SOCKET='./runtime/e2b.sock' FLEET_E4B_SOCKET='./runtime/e4b.sock' agent-harness < /dev/null"
+                    args "-lc" "AGENT_NAME=codex AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='./runtime/openai.sock' FLEET_PROVIDER_MODEL='o3' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_LIGHT_SOCKET='./runtime/light.sock' FLEET_HEAVY_SOCKET='./runtime/heavy.sock' agent-harness < /dev/null"
                 }
             }
             pane split_direction="vertical" {
@@ -24,7 +24,7 @@ layout {
                     args "-lc" "AGENT_MAIL_DB='./runtime/agent-mail.db' agent-mail tail public < /dev/null"
                 }
                 pane name="DIGEST" command="bash" {
-                    args "-lc" "AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' AGENT_MAIL_BIN='agent-mail' FLEET_E2B_SOCKET='./runtime/e2b.sock' fleet-digest < /dev/null"
+                    args "-lc" "AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' AGENT_MAIL_BIN='agent-mail' FLEET_LIGHT_SOCKET='./runtime/light.sock' fleet-digest < /dev/null"
                 }
                 pane name="MEMORY" command="bash" {
                     args "-lc" "AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' AGENT_MEMORY_BIN='agent-memory' fleet-librarian < /dev/null"
@@ -68,11 +68,11 @@ layout {
                 }
             }
             pane split_direction="vertical" {
-                pane name="E2B" command="bash" {
-                    args "-lc" "export LD_LIBRARY_PATH=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\"):./build/node_modules/onnxruntime-node/bin/napi-v6/linux/x64:${LD_LIBRARY_PATH}\" && FLEET_E2B_SOCKET='./runtime/e2b.sock' fleet-e2b < /dev/null"
+                pane name="LIGHT" command="bash" {
+                    args "-lc" "export LD_LIBRARY_PATH=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\"):./build/node_modules/onnxruntime-node/bin/napi-v6/linux/x64:${LD_LIBRARY_PATH}\" && FLEET_LIGHT_SOCKET='./runtime/light.sock' fleet-light < /dev/null"
                 }
-                pane name="E4B" command="bash" {
-                    args "-lc" "export LD_LIBRARY_PATH=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\"):./build/node_modules/onnxruntime-node/bin/napi-v6/linux/x64:${LD_LIBRARY_PATH}\" && FLEET_E4B_SOCKET='./runtime/e4b.sock' fleet-e4b < /dev/null"
+                pane name="HEAVY" command="bash" {
+                    args "-lc" "export LD_LIBRARY_PATH=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\"):./build/node_modules/onnxruntime-node/bin/napi-v6/linux/x64:${LD_LIBRARY_PATH}\" && FLEET_HEAVY_SOCKET='./runtime/heavy.sock' fleet-heavy < /dev/null"
                 }
             }
         }
