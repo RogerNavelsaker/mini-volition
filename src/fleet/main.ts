@@ -38,6 +38,10 @@ const agentMemorySrc = join(srcDir, "agent-memory", "main.ts");
 const embedSrc = join(srcDir, "fleet-embed", "main.ts");
 const rerankSrc = join(srcDir, "fleet-rerank", "main.ts");
 const e2bSrc = join(srcDir, "fleet-e2b", "main.ts");
+const claudeProviderSrc = join(srcDir, "fleet-claude", "main.ts");
+const geminiProviderSrc = join(srcDir, "fleet-gemini", "main.ts");
+const openaiProviderSrc = join(srcDir, "fleet-openai", "main.ts");
+const openrouterProviderSrc = join(srcDir, "fleet-openrouter", "main.ts");
 const e4bSrc = join(srcDir, "fleet-e4b", "main.ts");
 const mailBin = join(binDir, "agent-mail");
 const fleetBin = join(binDir, "fleet");
@@ -56,6 +60,14 @@ const embedBin = join(binDir, "fleet-embed");
 const rerankBin = join(binDir, "fleet-rerank");
 const e2bBin = join(binDir, "fleet-e2b");
 const e4bBin = join(binDir, "fleet-e4b");
+const claudeProviderBin = join(binDir, "fleet-claude");
+const geminiProviderBin = join(binDir, "fleet-gemini");
+const openaiProviderBin = join(binDir, "fleet-openai");
+const openrouterProviderBin = join(binDir, "fleet-openrouter");
+const claudeProviderBundle = join(buildDir, "fleet-claude.mjs");
+const geminiProviderBundle = join(buildDir, "fleet-gemini.mjs");
+const openaiProviderBundle = join(buildDir, "fleet-openai.mjs");
+const openrouterProviderBundle = join(buildDir, "fleet-openrouter.mjs");
 const mailDb = join(runtimeDir, "agent-mail.db");
 const jobsDb = join(runtimeDir, "agent-jobs.db");
 const memoryDb = join(runtimeDir, "agent-memory.db");
@@ -283,6 +295,25 @@ function buildBinaries() {
     [rerankSrc, rerankBundle, rerankBin, "fleet-rerank"],
     [e2bSrc, e2bBundle, e2bBin, "fleet-e2b"],
     [e4bSrc, e4bBundle, e4bBin, "fleet-e4b"],
+  ] as const) {
+    runOrDie(["bun", "build", "--target=bun", "--packages=external", src, "--outfile", bundle]);
+    writeFileSync(bin, `#!/usr/bin/env bash
+set -euo pipefail
+script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/../.." && pwd)"
+export NODE_PATH="$repo_root/build/node_modules"
+cd "$repo_root"
+exec bun "$repo_root/build/${name}.mjs" "$@"
+`, "utf-8");
+    chmodSync(bin, 0o755);
+  }
+  // Cloud provider workers (one process per provider, one socket per process)
+  // Same wrapper pattern as inference workers — NODE_PATH for SDK resolution.
+  for (const [src, bundle, bin, name] of [
+    [claudeProviderSrc, claudeProviderBundle, claudeProviderBin, "fleet-claude"],
+    [geminiProviderSrc, geminiProviderBundle, geminiProviderBin, "fleet-gemini"],
+    [openaiProviderSrc, openaiProviderBundle, openaiProviderBin, "fleet-openai"],
+    [openrouterProviderSrc, openrouterProviderBundle, openrouterProviderBin, "fleet-openrouter"],
   ] as const) {
     runOrDie(["bun", "build", "--target=bun", "--packages=external", src, "--outfile", bundle]);
     writeFileSync(bin, `#!/usr/bin/env bash
