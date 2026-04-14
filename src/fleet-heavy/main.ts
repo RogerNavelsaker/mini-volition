@@ -6,10 +6,10 @@ import {
 } from "@huggingface/transformers";
 import { startInferenceServer } from "../fleet-inference/server";
 
-const socketPath = resolve(process.env.FLEET_E4B_SOCKET || "runtime/e4b.sock");
-const modelId = process.env.FLEET_E4B_MODEL || "onnx-community/gemma-4-E4B-it-ONNX";
-const modelDType = process.env.FLEET_E4B_DTYPE || "q4f16";
-const maxNewTokens = Number(process.env.FLEET_E4B_MAX_TOKENS || "320");
+const socketPath = resolve(process.env.FLEET_HEAVY_SOCKET || "runtime/heavy.sock");
+const modelId = process.env.FLEET_HEAVY_MODEL || "onnx-community/gemma-4-E4B-it-ONNX";
+const modelDType = process.env.FLEET_HEAVY_DTYPE || "q4f16";
+const maxNewTokens = Number(process.env.FLEET_HEAVY_MAX_TOKENS || "320");
 const cacheDir = process.env.FLEET_INFERENCE_CACHE_DIR || `${dirname(socketPath)}/.cache/transformers`;
 
 env.allowRemoteModels = true;
@@ -25,7 +25,7 @@ let modelPromise: Promise<{
 async function getModel() {
   if (!modelPromise) {
     modelPromise = (async () => {
-      console.log(`[E4B] Loading model ${modelId} with dtype=${modelDType}`);
+      console.log(`[HEAVY] Loading model ${modelId} with dtype=${modelDType}`);
       const processor = await AutoProcessor.from_pretrained(modelId);
       const model = await Gemma4ForConditionalGeneration.from_pretrained(modelId, {
         dtype: modelDType as any,
@@ -161,4 +161,4 @@ ${query.slice(0, 1200)}`;
   }
 }
 
-startInferenceServer(socketPath, handleRequest, "E4B");
+startInferenceServer(socketPath, handleRequest, "HEAVY");

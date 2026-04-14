@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/.." && pwd)"
+
+echo "== fleet status =="
+if command -v fleet &>/dev/null; then
+  fleet status
+else
+  # Try local bin if not in path
+  "$repo_root/bin/fleet" status 2>/dev/null || echo "fleet binary not found"
+fi
+echo
+
+echo "== mini-volition =="
+git -C "$repo_root" status --short --branch
+echo

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/.." && pwd)"
+
+echo "== bootstrap mini-volition =="
+if [ -d "$repo_root/.git" ]; then
+  echo "present: mini-volition"
+else
+  echo "missing: mini-volition"
+fi
+echo "Workspace ready."

@@ -1,0 +1,20 @@
+{
+  "name": "mini-volition",
+  "version": "0.1.0",
+  "description": "Local ACP-based fleet runtime",
+  "type": "module",
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "lint": "bunx eslint src/**/*.ts",
+    "lint:fix": "bunx eslint src/**/*.ts --fix",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@types/node": "^22.13.4",
+    "eslint": "^9.20.1",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.24.1"
+  }
+}

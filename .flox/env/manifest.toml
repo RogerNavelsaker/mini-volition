@@ -1,0 +1,34 @@
+schema-version = "1.10.0"
+
+[install]
+bun.pkg-path = "bun"
+sqlite.pkg-path = "sqlite"
+zellij.pkg-path = "zellij"
+
+[vars]
+WORKSPACE_OWNER = "RogerNavelsaker"
+WORKSPACE_META = "mini-volition"
+
+[hook]
+on-activate = '''
+  export META_REPO_ROOT="$FLOX_ENV_PROJECT"
+  export SHARED_WORKSPACE_ROOT="$FLOX_ENV_PROJECT"
+'''
+
+[profile]
+common = """
+  export PATH="$META_REPO_ROOT/bin:$PATH"
+  alias fleet-build="bun run build"
+  alias fleet-lint="bun run lint"
+  alias fleet-test="bun run test"
+  alias workspace-bootstrap="$META_REPO_ROOT/scripts/bootstrap"
+  alias workspace-status="$META_REPO_ROOT/scripts/status"
+"""
+
+[services]
+
+[build]
+
+[options]
+systems = ["x86_64-linux"]
+allow.unfree = true
