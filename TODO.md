@@ -479,7 +479,7 @@ Harness turn path (`embed.sock`, `rerank.sock`) is never blocked by slow generat
 2. Each worker is a standalone binary built with `bun build --compile`
 3. ~~Replace single Zellij pane with four panes (or a tab)~~ — DONE, now a dedicated `inference` tab
 4. Callers use env vars: `FLEET_EMBED_SOCKET`, `FLEET_RERANK_SOCKET`, `FLEET_E2B_SOCKET`, `FLEET_E4B_SOCKET`
-5. Add all four workers to `fleet build` and `fleet.kdl`
+5. Add all four workers to build script and `fleet.kdl`
 
 ## inference expansion status
 

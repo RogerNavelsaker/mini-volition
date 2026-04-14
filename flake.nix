@@ -36,9 +36,6 @@
           shellHook = ''
             export META_REPO_ROOT=$(pwd)
             export PATH="$META_REPO_ROOT/bin:$PATH"
-            alias fleet-build="bun run build"
-            alias fleet-lint="bun run lint"
-            alias fleet-test="bun run test"
             echo "mini-volition dev shell active"
           '';
         };

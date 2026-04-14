@@ -84,7 +84,7 @@ const geminiBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/gmi";
 const codexBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/cod";
 
 function usage(): never {
-  console.error("Usage: bin/fleet <build|start|attach|stop|down|restart|status|up|governor-status|governor-bump|governor-force|rebuild-governor|verify-governor>");
+  console.error("Usage: bin/fleet <start|attach|stop|down|restart|status|up|governor-status|governor-bump|governor-force|rebuild-governor|verify-governor>");
   process.exit(64);
 }
 
@@ -244,90 +244,6 @@ function verifyAgentBins(): boolean {
   return ok;
 }
 
-function runOrDie(cmd: string[]) {
-  const result = spawnSync(cmd);
-  if (result.exitCode !== 0) {
-    process.stderr.write(result.stderr);
-    process.exit(result.exitCode);
-  }
-}
-
-function buildBinaries() {
-  requireCmd("bun");
-  ensureBinDir();
-  ensureBuildDir();
-  ensureConfigDir();
-  ensureRuntimeDir();
-  ensureStateDir();
-  if (!verifyAgentBins()) process.exit(1);
-
-  for (const stalePath of [
-    join(fleetRoot, "fleet"),
-    join(buildDir, "fleet"),
-  ]) {
-    try {
-      unlinkSync(stalePath);
-    } catch {}
-  }
-
-  for (const staleDir of [
-    join(fleetRoot, "node_modules"),
-  ]) {
-    try {
-      rmSync(staleDir, { recursive: true, force: true });
-    } catch {}
-  }
-
-  runOrDie(["bun", "build", join(srcDir, "fleet", "main.ts"), "--compile", "--outfile", fleetBin]);
-  runOrDie(["bun", "build", mailSrc, "--compile", "--outfile", mailBin]);
-  runOrDie(["bun", "build", harnessSrc, "--compile", "--outfile", harnessBin]);
-  runOrDie(["bun", "build", operatorSrc, "--compile", "--outfile", operatorBin]);
-  runOrDie(["bun", "build", agentStateSrc, "--compile", "--outfile", agentStateBin]);
-  runOrDie(["bun", "build", agentJobsSrc, "--compile", "--outfile", agentJobsBin]);
-  runOrDie(["bun", "build", agentMemorySrc, "--compile", "--outfile", agentMemoryBin]);
-  runOrDie(["bun", "build", digestSrc, "--compile", "--outfile", digestBin]);
-  runOrDie(["bun", "build", librarianSrc, "--compile", "--outfile", librarianBin]);
-  // Per-model inference workers (one process per model, one socket per process)
-  // Workers cd to repo root (not build/) so relative socket paths resolve correctly.
-  // NODE_PATH points to build/node_modules so onnxruntime-node can still be found.
-  for (const [src, bundle, bin, name] of [
-    [embedSrc, embedBundle, embedBin, "fleet-embed"],
-    [rerankSrc, rerankBundle, rerankBin, "fleet-rerank"],
-    [e2bSrc, e2bBundle, e2bBin, "fleet-e2b"],
-    [e4bSrc, e4bBundle, e4bBin, "fleet-e4b"],
-  ] as const) {
-    runOrDie(["bun", "build", "--target=bun", "--packages=external", src, "--outfile", bundle]);
-    writeFileSync(bin, `#!/usr/bin/env bash
-set -euo pipefail
-script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd -- "$script_dir/../.." && pwd)"
-export NODE_PATH="$repo_root/build/node_modules"
-cd "$repo_root"
-exec bun "$repo_root/build/${name}.mjs" "$@"
-`, "utf-8");
-    chmodSync(bin, 0o755);
-  }
-  // Cloud provider workers (one process per provider, one socket per process)
-  // Same wrapper pattern as inference workers — NODE_PATH for SDK resolution.
-  for (const [src, bundle, bin, name] of [
-    [claudeProviderSrc, claudeProviderBundle, claudeProviderBin, "fleet-claude"],
-    [geminiProviderSrc, geminiProviderBundle, geminiProviderBin, "fleet-gemini"],
-    [openaiProviderSrc, openaiProviderBundle, openaiProviderBin, "fleet-openai"],
-    [openrouterProviderSrc, openrouterProviderBundle, openrouterProviderBin, "fleet-openrouter"],
-  ] as const) {
-    runOrDie(["bun", "build", "--target=bun", "--packages=external", src, "--outfile", bundle]);
-    writeFileSync(bin, `#!/usr/bin/env bash
-set -euo pipefail
-script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd -- "$script_dir/../.." && pwd)"
-export NODE_PATH="$repo_root/build/node_modules"
-cd "$repo_root"
-exec bun "$repo_root/build/${name}.mjs" "$@"
-`, "utf-8");
-    chmodSync(bin, 0o755);
-  }
-}
-
 function withDb<T>(fn: (db: Database) => T): T {
   const db = new Database(fleetDb);
   db.exec("PRAGMA busy_timeout = 5000;");
@@ -445,7 +361,6 @@ function governorBump(agent: string, windowSec: number, turnLimit: number, reaso
 
 function startSession() {
   requireCmd("zellij");
-  buildBinaries();
 
   process.env.PATH = `${binDir}:${process.env.PATH}`;
 
@@ -559,9 +474,6 @@ function showStatus() {
 }
 
 switch (process.argv[2]) {
-  case "build":
-    buildBinaries();
-    break;
   case "start":
     startSession();
     break;

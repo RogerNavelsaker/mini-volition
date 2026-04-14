@@ -116,7 +116,6 @@ Background worker that schedules maintenance over per-agent memory:
 
 Session manager and governor. Handles:
 
-- binary compilation (`fleet build`)
 - Zellij session lifecycle (`fleet start/stop/attach/up/down/restart`)
 - governor rate-limiting (windowed turn counts, forced cooldowns)
 - status reporting

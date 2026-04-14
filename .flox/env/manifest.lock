@@ -21,7 +21,7 @@
       "on-activate": "  export META_REPO_ROOT=\"$FLOX_ENV_PROJECT\"\n  export SHARED_WORKSPACE_ROOT=\"$FLOX_ENV_PROJECT\"\n"
     },
     "profile": {
-      "common": "  export PATH=\"$META_REPO_ROOT/.fleet/bin:$PATH\"\n  alias workspace-bootstrap=\"$META_REPO_ROOT/scripts/bootstrap\"\n  alias workspace-status=\"$META_REPO_ROOT/scripts/status\"\n"
+      "common": "  export PATH=\"$META_REPO_ROOT/bin:$PATH\"\n  alias fleet-build=\"bun run build\"\n  alias fleet-lint=\"bun run lint\"\n  alias fleet-test=\"bun run test\"\n  alias workspace-bootstrap=\"$META_REPO_ROOT/scripts/bootstrap\"\n  alias workspace-status=\"$META_REPO_ROOT/scripts/status\"\n"
     },
     "options": {
       "systems": [

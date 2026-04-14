@@ -10,6 +10,13 @@
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit"
   },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.88.0",
+    "@google/genai": "^1.50.0",
+    "@huggingface/transformers": "next",
+    "openai": "^6.34.0",
+    "sharp": "^0.34.5"
+  },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
     "@types/node": "^22.13.4",

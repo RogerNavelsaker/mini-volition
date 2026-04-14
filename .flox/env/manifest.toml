@@ -18,9 +18,6 @@ on-activate = '''
 [profile]
 common = """
   export PATH="$META_REPO_ROOT/bin:$PATH"
-  alias fleet-build="bun run build"
-  alias fleet-lint="bun run lint"
-  alias fleet-test="bun run test"
   alias workspace-bootstrap="$META_REPO_ROOT/scripts/bootstrap"
   alias workspace-status="$META_REPO_ROOT/scripts/status"
 """
@@ -28,6 +25,7 @@ common = """
 [services]
 
 [build]
+command = "bun install && bun run build"
 
 [options]
 systems = ["x86_64-linux"]
