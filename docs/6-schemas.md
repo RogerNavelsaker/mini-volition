@@ -1,5 +1,24 @@
 # schemas
 
+## General Protocol Schemas
+
+### AgentHarnessEvent
+
+Standardized event schema for all wake sources (Mail, Internal Jobs, System Events).
+
+```json
+{
+  "id": "evt-001",
+  "type": "AgentHarnessEvent",
+  "agent": "abe-03",
+  "timestamp_event": "2026-01-02T09:59:59Z",
+  "event_type": "NewInboxMessage | SocialDigest | TaskCompleted",
+  "source": "inbox:agent | volition:social_digests | AgentHarness",
+  "content": "...",
+  "action_id": "optional-uuid"
+}
+```
+
 ## action envelope
 
 The structured contract between agents and the harness.

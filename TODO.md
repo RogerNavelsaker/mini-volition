@@ -322,14 +322,11 @@ Need explicit durable state for:
 - last wake reason
 - in-flight action execution
 
-### 7. improve recovery
+### 8. Implement Refractory Wake Scheduler
+- implement a two-group refractory wake policy (Group A: hot senses/streams, Group B: refractory inbox/alarms)
+- add 10-30s random cooldowns per-source to suppress runaway feedback loops
+- unify with the existing governor cooldown logic
 
-Need:
-
-- crash-safe in-flight execution records
-- replayable action journal
-- stuck-turn detection
-- resume semantics after interrupted work
 
 ## what is missing for fuller guppi-like
 

@@ -254,13 +254,10 @@ Secondary targets:
 - ~~retrieval-aware memory promotion and compaction~~ — **DONE** (LLM extraction, HyDE, dual keywords, reranking, embedded link evidence)
 - stronger async memory workers and repair flows
 
-## prompt source rule
-
-Treat `docs/*.md` and `prompts/*.md` as the source material for generated system prompts.
-
-Use `references/*.md` for upstream behavior notes and external design references.
-
-Do not bury durable fleet doctrine only inside code strings when it should live in docs or prompt source files.
+## documentation handling rule
+- treat `docs/*.md` as the canonical source of truth for local fleet architecture and behavior.
+- treat `references/` as purely informational context from upstream Volition.
+- NEVER inject `references/` content into agent prompts; it is for architectural inspiration only.
 
 ## editing guidance
 

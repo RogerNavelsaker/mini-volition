@@ -247,6 +247,10 @@ Then:
 - `docs/genesis.md`
 - `docs/fleet-protocols.md`
 
+## documentation strategy
+- `docs/` contains canonical mini-volition architecture, protocol, and governance documentation.
+- `references/` contains external upstream Volition documentation for contextual comparison; it is not injected into agent prompts.
+
 ## non-goals
 
 This folder no longer carries:

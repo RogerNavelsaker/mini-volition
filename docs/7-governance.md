@@ -6,6 +6,23 @@ Safety invariants (operator-controlled) > fleet protocols (documented norms) > i
 
 Agents cannot override fleet protocols. The operator can override anything.
 
+## scheduler & governance enhancements
+
+- **Refractory Scheduler**: Implements a two-group wake policy to suppress feedback loops.
+    - **Group A (Always Hot)**: Sensory streams, urgent internal jobs, emergency lines.
+    - **Group B (Refractory Workload)**: Inbox messages, background tasks, maintenance.
+    - **Cooldowns**: 10–30s random refractory cooldown per-source in Group B.
+
+- **Dynamic Subscriptions**: Agents manage awareness by subscribing/unsubscribing to channels (e.g., specific work streams, "Town Square" ambient social channels).
+    - **Focus Protocol**: Agents automatically unsubscribe from noise channels during deep-work tasks, with auto-resubscribe reminders set after task deadlines.
+
+- **Multi-Scribe Compute**: Offload-capable scribe roster for autonomous delegation:
+    - **`roamer`**: Autonomous exploration, research, and information gathering.
+    - **`riker`**: Decision support, trade-off analysis, and option drafting.
+    - **`scribe`**, **`milo`**, **`homer`**: (Existing) Analysis, validation, and curation.
+
+- **Immutable Audit Log**: Append-only `state/audit.jsonl` containing final action decisions (pre-dispatch) to provide a verifiable Black Box audit trail, separate from internal turn journals.
+
 ## fleet protocols
 
 Documented in [fleet-protocols.md](fleet-protocols.md). Current protocols:

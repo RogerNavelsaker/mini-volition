@@ -8,6 +8,8 @@ import {
   writeFileSync,
   chmodSync,
   rmSync,
+  readFileSync,
+  existsSync,
 } from "fs";
 import { resolve, join, dirname } from "path";
 import { appendFleetArtifact } from "../state-artifacts/lib";
@@ -40,7 +42,60 @@ const DEFAULT_AGENTS: AgentConfig[] = [
   { name: "codex", model: "o3", socket: "openai.sock" },
 ];
 
+function loadConfig(): { agents: AgentConfig[] } {
+  const configPath = process.env.FLEET_CONFIG || join(configDir, "fleet.json");
+  let agents = [...DEFAULT_AGENTS];
+
+  if (existsSync(configPath)) {
+    try {
+      const data = JSON.parse(readFileSync(configPath, "utf-8"));
+      if (Array.isArray(data.agents)) {
+        agents = data.agents;
+      }
+    } catch (e) {
+      console.error(`Warning: Failed to load config from ${configPath}: ${e}`);
+    }
+  }
+
+  // Allow environment variable overrides: FLEET_<NAME>_MODEL
+  return {
+    agents: agents.map(a => ({
+      ...a,
+      model: process.env[`FLEET_${a.name.toUpperCase()}_MODEL`] || a.model,
+    }))
+  };
+}
+
+const mailDb = join(runtimeDir, "agent-mail.db");
+const jobsDb = join(runtimeDir, "agent-jobs.db");
+const memoryDb = join(runtimeDir, "agent-memory.db");
+const stateDb = join(runtimeDir, "agent-state.db");
+const fleetDb = join(runtimeDir, "fleet.db");
+const librarianDb = join(runtimeDir, "fleet-librarian.db");
+const embedSocket = join(runtimeDir, "embed.sock");
+const rerankSocket = join(runtimeDir, "rerank.sock");
+const e2bSocket = join(runtimeDir, "e2b.sock");
+const e4bSocket = join(runtimeDir, "e4b.sock");
+
+const claudeBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/cc";
+const geminiBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/gmi";
+const codexBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/cod";
+
+const mailBin = join(binDir, "agent-mail");
+const harnessBin = join(binDir, "agent-harness");
+const operatorBin = join(binDir, "operator-harness");
+const agentStateBin = join(binDir, "agent-state");
+const agentJobsBin = join(binDir, "agent-jobs");
+const agentMemoryBin = join(binDir, "agent-memory");
+const digestBin = join(binDir, "fleet-digest");
+const librarianBin = join(binDir, "fleet-librarian");
+const embedBin = join(binDir, "fleet-embed");
+const rerankBin = join(binDir, "fleet-rerank");
+const e2bBin = join(binDir, "fleet-e2b");
+const e4bBin = join(binDir, "fleet-e4b");
+
 function generateKdl(): string {
+  const config = loadConfig();
   const mailDbPath = resolve(mailDb);
   const jobsDbPath = resolve(jobsDb);
   const memoryDbPath = resolve(memoryDb);
@@ -51,7 +106,7 @@ function generateKdl(): string {
   const e2bSock = resolve(e2bSocket);
   const e4bSock = resolve(e4bSocket);
 
-  const agentPanes = DEFAULT_AGENTS.map(a => `
+  const agentPanes = config.agents.map(a => `
                 pane name="${a.name.toUpperCase()}" command="bash" {
                     args "-lc" "AGENT_NAME=${a.name} AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='${resolve(runtimeDir, a.socket)}' FLEET_PROVIDER_MODEL='${a.model}' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='${mailDbPath}' AGENT_JOBS_DB='${jobsDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' FLEET_LIBRARIAN_DB='${libDbPath}' FLEET_EMBED_SOCKET='${embedSock}' FLEET_E2B_SOCKET='${e2bSock}' FLEET_E4B_SOCKET='${e4bSock}' agent-harness < /dev/null"
                 }`).join("");
@@ -130,65 +185,45 @@ function generateKdl(): string {
 `;
 }
 
-const mailSrc = join(srcDir, "agent-mail", "main.ts");
-const harnessSrc = join(srcDir, "agent-harness", "main.ts");
-const operatorSrc = join(srcDir, "operator-harness", "main.ts");
-const digestSrc = join(srcDir, "fleet-digest", "main.ts");
-const librarianSrc = join(srcDir, "fleet-librarian", "main.ts");
-const agentStateSrc = join(srcDir, "agent-state", "main.ts");
-const agentJobsSrc = join(srcDir, "agent-jobs", "main.ts");
-const agentMemorySrc = join(srcDir, "agent-memory", "main.ts");
-const embedSrc = join(srcDir, "fleet-embed", "main.ts");
-const rerankSrc = join(srcDir, "fleet-rerank", "main.ts");
-const e2bSrc = join(srcDir, "fleet-e2b", "main.ts");
-const claudeProviderSrc = join(srcDir, "fleet-claude", "main.ts");
-const geminiProviderSrc = join(srcDir, "fleet-gemini", "main.ts");
-const openaiProviderSrc = join(srcDir, "fleet-openai", "main.ts");
-const openrouterProviderSrc = join(srcDir, "fleet-openrouter", "main.ts");
-const e4bSrc = join(srcDir, "fleet-e4b", "main.ts");
-const mailBin = join(binDir, "agent-mail");
-const fleetBin = join(binDir, "fleet");
-const harnessBin = join(binDir, "agent-harness");
-const operatorBin = join(binDir, "operator-harness");
-const digestBin = join(binDir, "fleet-digest");
-const librarianBin = join(binDir, "fleet-librarian");
-const agentJobsBin = join(binDir, "agent-jobs");
-const embedBundle = join(buildDir, "fleet-embed.mjs");
-const rerankBundle = join(buildDir, "fleet-rerank.mjs");
-const e2bBundle = join(buildDir, "fleet-e2b.mjs");
-const e4bBundle = join(buildDir, "fleet-e4b.mjs");
-const agentStateBin = join(binDir, "agent-state");
-const agentMemoryBin = join(binDir, "agent-memory");
-const embedBin = join(binDir, "fleet-embed");
-const rerankBin = join(binDir, "fleet-rerank");
-const e2bBin = join(binDir, "fleet-e2b");
-const e4bBin = join(binDir, "fleet-e4b");
-const claudeProviderBin = join(binDir, "fleet-claude");
-const geminiProviderBin = join(binDir, "fleet-gemini");
-const openaiProviderBin = join(binDir, "fleet-openai");
-const openrouterProviderBin = join(binDir, "fleet-openrouter");
-const claudeProviderBundle = join(buildDir, "fleet-claude.mjs");
-const geminiProviderBundle = join(buildDir, "fleet-gemini.mjs");
-const openaiProviderBundle = join(buildDir, "fleet-openai.mjs");
-const openrouterProviderBundle = join(buildDir, "fleet-openrouter.mjs");
-const mailDb = join(runtimeDir, "agent-mail.db");
-const jobsDb = join(runtimeDir, "agent-jobs.db");
-const memoryDb = join(runtimeDir, "agent-memory.db");
-const stateDb = join(runtimeDir, "agent-state.db");
-const fleetDb = join(runtimeDir, "fleet.db");
-const librarianDb = join(runtimeDir, "fleet-librarian.db");
-const embedSocket = join(runtimeDir, "embed.sock");
-const rerankSocket = join(runtimeDir, "rerank.sock");
-const e2bSocket = join(runtimeDir, "e2b.sock");
-const e4bSocket = join(runtimeDir, "e4b.sock");
-
-const claudeBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/cc";
-const geminiBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/gmi";
-const codexBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/cod";
-
 function usage(): never {
-  console.error("Usage: bin/fleet <start|attach|detach|stop|down|restart|status|up|governor-status|governor-bump|governor-force|rebuild-governor|verify-governor>");
+  console.error("Usage: bin/fleet <genesis|start|attach|detach|stop|terminus|up|down|restart|status|governor-status|governor-bump|governor-force|rebuild-governor|verify-governor>");
   process.exit(64);
+}
+
+function genesisSession() {
+  console.log("== genesis: initializing workspace ==");
+  ensureBinDir();
+  ensureConfigDir();
+  ensureRuntimeDir();
+  ensureStateDir();
+  
+  requireCmd("bun");
+  requireCmd("zellij");
+
+  if (!verifyAgentBins()) {
+    console.error("Genesis failed: Missing agent binaries.");
+    process.exit(1);
+  }
+  console.log("Genesis complete. Workspace ready.");
+}
+
+function terminusSession() {
+  console.log("== terminus: cleaning up runtime data ==");
+  for (const base of [mailDb, jobsDb, memoryDb, stateDb, fleetDb, librarianDb]) {
+    for (const f of [base, `${base}-wal`, `${base}-shm`]) {
+      try {
+        if (accessSafe(f)) unlinkSync(f);
+      } catch {}
+    }
+  }
+  for (const sock of [embedSocket, rerankSocket, e2bSocket, e4bSocket, 
+                     join(runtimeDir, "claude.sock"), join(runtimeDir, "gemini.sock"),
+                     join(runtimeDir, "openai.sock"), join(runtimeDir, "openrouter.sock")]) {
+    try {
+      if (accessSafe(sock)) unlinkSync(sock);
+    } catch {}
+  }
+  console.log("Terminus complete. Databases and sockets removed.");
 }
 
 function governorArtifactPath() {
@@ -321,6 +356,7 @@ function ensureBinDir() {
 }
 
 function ensureBuildDir() {
+  const buildDir = join(fleetRoot, "build");
   mkdirSync(buildDir, { recursive: true });
 }
 
@@ -533,23 +569,6 @@ function stopSession() {
   console.log(`fleet session '${sessionName}' stopped`);
 }
 
-function downSession() {
-  stopSession();
-  for (const base of [mailDb, jobsDb, memoryDb, stateDb, fleetDb, librarianDb]) {
-    for (const f of [base, `${base}-wal`, `${base}-shm`]) {
-      try {
-        unlinkSync(f);
-      } catch {}
-    }
-  }
-  for (const sock of [embedSocket, rerankSocket, e2bSocket, e4bSocket]) {
-    try {
-      unlinkSync(sock);
-    } catch {}
-  }
-  console.log(`fleet databases removed`);
-}
-
 function showStatus() {
   ensureRuntimeDir();
   ensureStateDir();
@@ -590,6 +609,9 @@ function showStatus() {
 }
 
 switch (process.argv[2]) {
+  case "genesis":
+    genesisSession();
+    break;
   case "start":
     startSession();
     break;
@@ -602,8 +624,12 @@ switch (process.argv[2]) {
   case "stop":
     stopSession();
     break;
+  case "terminus":
+    terminusSession();
+    break;
   case "down":
-    downSession();
+    stopSession();
+    terminusSession();
     break;
   case "restart":
     stopSession();
@@ -628,6 +654,7 @@ switch (process.argv[2]) {
     await verifyGovernor();
     break;
   case "up":
+    genesisSession();
     startSession();
     attachSession();
     break;
