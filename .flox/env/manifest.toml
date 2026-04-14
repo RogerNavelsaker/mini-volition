@@ -4,6 +4,13 @@ schema-version = "1.10.0"
 bun.pkg-path = "bun"
 sqlite.pkg-path = "sqlite"
 zellij.pkg-path = "zellij"
+"seeds".flake = "github:RogerNavelsaker/nixpkg-seeds"
+"mulch".flake = "github:RogerNavelsaker/nixpkg-mulch"
+"mulch".outputs = ["out", "ml"]
+"trellis".flake = "github:RogerNavelsaker/nixpkg-trellis"
+"trellis".outputs = ["out", "tl"]
+"canopy".flake = "github:RogerNavelsaker/nixpkg-canopy"
+"canopy".outputs = ["out", "cn"]
 
 [vars]
 WORKSPACE_OWNER = "RogerNavelsaker"
@@ -25,7 +32,8 @@ common = """
 [services]
 
 [build]
-command = "bun install && bun run build"
+# [build.fleet]
+# command = "bun install && bun run scripts/build.ts"
 
 [options]
 systems = ["x86_64-linux"]

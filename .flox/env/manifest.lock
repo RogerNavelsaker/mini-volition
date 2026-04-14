@@ -6,8 +6,32 @@
       "bun": {
         "pkg-path": "bun"
       },
+      "canopy": {
+        "flake": "github:RogerNavelsaker/nixpkg-canopy",
+        "outputs": [
+          "out",
+          "cn"
+        ]
+      },
+      "mulch": {
+        "flake": "github:RogerNavelsaker/nixpkg-mulch",
+        "outputs": [
+          "out",
+          "ml"
+        ]
+      },
+      "seeds": {
+        "flake": "github:RogerNavelsaker/nixpkg-seeds"
+      },
       "sqlite": {
         "pkg-path": "sqlite"
+      },
+      "trellis": {
+        "flake": "github:RogerNavelsaker/nixpkg-trellis",
+        "outputs": [
+          "out",
+          "tl"
+        ]
       },
       "zellij": {
         "pkg-path": "zellij"
@@ -126,6 +150,114 @@
       },
       "system": "x86_64-linux",
       "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "install_id": "canopy",
+      "locked-url": "github:RogerNavelsaker/nixpkg-canopy/6db8f7bc32f5d1380a713b00d0207213f6713f48?narHash=sha256-jdxF/R8TAtSu6bu7EmY%2BAiORf30qtHnJkg0%2BBoZVagw%3D",
+      "flake-description": "Nix packaging scaffold for @os-eco/canopy-cli",
+      "locked-flake-attr-path": "packages.x86_64-linux.default",
+      "derivation": "/nix/store/r057k4qq7v5955biiw68b646bq84v7q9-canopy-0.2.3-r1.drv",
+      "outputs": {
+        "cn": "/nix/store/mh7qjbcwz8agydfddkvkd201bk1k0zz1-canopy-0.2.3-r1-cn",
+        "out": "/nix/store/k0ksj4dmyd9l4aj05kc23957bbf06097-canopy-0.2.3-r1"
+      },
+      "output-names": [
+        "out",
+        "cn"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "canopy-0.2.3-r1",
+      "pname": "canopy",
+      "version": "0.2.3-r1",
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "mulch",
+      "locked-url": "github:RogerNavelsaker/nixpkg-mulch/49dc9a8ac6441ead3285ea844d9750f96c114a30?narHash=sha256-%2BrKZokE7f5V4ePjx/CQ1yKs6mckB1%2BUtTirKD9Asf94%3D",
+      "flake-description": "Nix packaging scaffold for @os-eco/mulch-cli",
+      "locked-flake-attr-path": "packages.x86_64-linux.default",
+      "derivation": "/nix/store/7d7m2ylfjdf73gp7304nm4f1ccrjciri-mulch-0.6.3-r1.drv",
+      "outputs": {
+        "ml": "/nix/store/2crg2d25c1w696snmfgvh33mr7bqqwmc-mulch-0.6.3-r1-ml",
+        "out": "/nix/store/w9ip3iwg1xaqxmqns4ns8vdrllx2inc0-mulch-0.6.3-r1"
+      },
+      "output-names": [
+        "out",
+        "ml"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "mulch-0.6.3-r1",
+      "pname": "mulch",
+      "version": "0.6.3-r1",
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "seeds",
+      "locked-url": "github:RogerNavelsaker/nixpkg-seeds/4178fc20b97a5aecd55f8b4c0dcc9820a1030557?narHash=sha256-A%2BqlScfKJo6rEu21GjjCZ8HbS102rpYyW%2BNPzp0jNnk%3D",
+      "flake-description": "Nix packaging scaffold for @os-eco/seeds-cli",
+      "locked-flake-attr-path": "packages.x86_64-linux.default",
+      "derivation": "/nix/store/00skvnnil5w1i807psdxdva4hmdkzw4z-seeds-0.2.5-r3.drv",
+      "outputs": {
+        "out": "/nix/store/3pbsmpp2c8cdy29h0f9dxjspp0ph8lps-seeds-0.2.5-r3",
+        "sd": "/nix/store/6kjyamhjxwg0biqd7cwn2rmnq8sf6kl4-seeds-0.2.5-r3-sd"
+      },
+      "output-names": [
+        "out",
+        "sd"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "seeds-0.2.5-r3",
+      "pname": "seeds",
+      "version": "0.2.5-r3",
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "trellis",
+      "locked-url": "github:RogerNavelsaker/nixpkg-trellis/c7b4435245040fa8a50cd73797e05584ebd86b9c?narHash=sha256-uh12aHJx6t4LBi9%2BoXbxa84BSe4qK8wCH%2BjJ8TP/epY%3D",
+      "flake-description": "Nix packaging scaffold for @os-eco/trellis-cli",
+      "locked-flake-attr-path": "packages.x86_64-linux.default",
+      "derivation": "/nix/store/xpp9wvmhqr707240zkz7h73cvifhvsa5-trellis-0.1.1-r1.drv",
+      "outputs": {
+        "out": "/nix/store/wahjkay4akdp0n8ifdd86k5wqbkdr0a7-trellis-0.1.1-r1",
+        "tl": "/nix/store/5gqwrhrzk4vas4qby6cpx2gvjvwfzqvx-trellis-0.1.1-r1-tl"
+      },
+      "output-names": [
+        "out",
+        "tl"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "trellis-0.1.1-r1",
+      "pname": "trellis",
+      "version": "0.1.1-r1",
+      "broken": false,
+      "unfree": false,
       "priority": 5
     }
   ]
