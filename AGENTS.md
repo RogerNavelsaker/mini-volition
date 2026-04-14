@@ -1,25 +1,41 @@
-# Agent Development Guide
+# §AgentDevGuide
+Guidelines for LLM agents (Claude Code, Gemini CLI, etc.) performing development work within this repository.
 
-Operating guide for building and maintaining the Mini-Volition runtime.
+## §Scope
+This guide provides mandatory behavioral constraints and architectural patterns for agents modifying this codebase. 
 
-## Scope
-This guide documents the architecture, communication patterns, and development standards for the Mini-Volition codebase.
+## §Development Protocol
+1. **Constitution-First**: All system logic must adhere to the TDD-formatted specifications in `docs/`.
+2. **Atomic Edits**: Use surgical edits (e.g., `replace` tool) to modify the codebase.
+3. **State Integrity**: Never modify SQLite hot-path data directly. Use provided service entrypoints (`agent-mail`, `agent-jobs`, etc.) and append-first `state/` records.
+4. **No Bloat**: Avoid shims, legacy compatibility, or unused abstractions. Keep implementation minimal and aligned with current-state projections.
 
-## Identity & Prompting
-- Agent definitions are stored in `fleet_agent_identity`.
-- System prompts are dynamically assembled at runtime: Constitution (canonical docs in `docs/`) + identity record (DB).
+## §Behavioral Rules
+- **τEnvelope**: Agents interacting with the runtime must return valid JSON envelopes.
+- **§Scribe**: Offload fire-and-forget tasks (summarization, extraction, validation) to local workers (`spawn_scribe` → mail).
+- **§Recovery**: Replay-safe actions (noop, note) resume automatically; side-effects require manual resolution.
 
-## Behavioral Rules
-- **Envelope Protocol**: Agents must output valid JSON envelopes. The system fails closed on invalidation.
-- **Scribe Delegation**: Use the `spawn_scribe` action for fire-and-forget sub-task execution.
-- **Scratchpad**: Persistent agent state is stored in `runtime/scratchpads/`.
-- **Recovery**: Replay-safe actions (noop, note) resume automatically; side-effects require manual resolution via `agent-state resolve-turn`.
+## §Documentation Handling
+- **Canonical**: `docs/*.md` is the source of truth for architectural constraints.
+- **Updates**: Material changes to system behavior MUST be documented in the relevant `docs/` file using TDD-formatted markers.
+- **No References**: Never inject content from `references/` into the system prompt.
 
-## Documentation Handling
-- **Canonical**: `docs/*.md` is the source of truth for the system architecture.
-- **References**: `references/` is for context, never inject into prompts.
+## §BestPractices
+- **Language/Runtime**: TypeScript (latest stable), Bun (runtime + test runner).
+- **Conventions**:
+    - **Filenames**: kebab-case.
+    - **Folder Structure**: `src/<module>/main.ts` for entrypoints, helpers in subfolders.
+    - **Imports**: Strict relative imports (`./`, `../`). No implicit path aliases.
+- **Git**: 
+    - **Commits**: Focused, atomic commits per sub-task.
+    - **Messages**: Prefix with type (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`).
+- **Testing**: 1:1 test parity. All feature code MUST have a corresponding `*.test.ts` file.
+- **Safety**: Fail-closed logic. Validate all schemas at runtime boundary.
+EOF
 
-## Development Surface
-- **Entrypoint**: `bin/fleet`
-- **State**: `runtime/*.db` (hotpath) + `state/*.jsonl` (durable).
-- **Inference**: Socket-bound workers (`embed.sock`, etc.).
+## §References
+- **`docs/`**: Source of truth for system architecture and protocols. MUST be consulted before implementation.
+- **`TODO.md`**: Current active development roadmap. Implement items in priority order.
+- **`DONE.md`**: Historical archive of completed features and architectural evolution.
+- **`docs/STYLE.md`**: Mandatory TDD (Token Dense Dialect) styling guide for all doc updates.
+- **`docs/HISTORY.md`**: Contextual archive for deprecated/theoretical narratives.
