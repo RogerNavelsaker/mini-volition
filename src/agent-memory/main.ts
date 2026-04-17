@@ -7,6 +7,7 @@ import { computeNodeCentrality } from "./centrality";
 import { selectCompactionCandidates } from "./compaction";
 import { relationForItemKinds, upsertMemoryLink, invalidateMemoryLinks, timelineQueryTokens } from "./links";
 import { consolidateExtractedFacts, deriveFacts, invalidateMemoryFacts, upsertMemoryFact } from "./facts";
+import { selectBudgetedRows } from "./retrieval";
 import { ensureSchema } from "./schema";
 import { appendMemoryArtifact, appendMemorySourceArtifact } from "../state-artifacts/lib";
 import type {
@@ -56,6 +57,7 @@ if (Bun.argv[2] === "skill") {
 const [, , cmd, arg1, arg2] = Bun.argv;
 const staleAfterSeconds = Math.max(30, parseInt(process.env.FLEET_MEMORY_STALE_AFTER_SEC || "900", 10) || 900);
 const lookupCacheTtlSeconds = Math.max(5, parseInt(process.env.FLEET_MEMORY_CACHE_TTL_SEC || "60", 10) || 60);
+const lookupTokenBudget = Math.max(128, parseInt(process.env.FLEET_MEMORY_LOOKUP_TOKEN_BUDGET || "1200", 10) || 1200);
 const decayGraceDays = Math.max(0, parseInt(process.env.FLEET_MEMORY_DECAY_GRACE_DAYS || "7", 10) || 7);
 const decayFloor = Math.max(0, Math.min(1, parseFloat(process.env.FLEET_MEMORY_DECAY_FLOOR || "0.1") || 0.1));
 const rrfK = Math.max(1, parseInt(process.env.FLEET_MEMORY_RRF_K || "60", 10) || 60);
@@ -1240,10 +1242,12 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
     : mode === "global"
     ? (globalRanked.length ? globalRanked : finalRanked)
     : finalRanked;
+  const budgetedSelection = selectBudgetedRows(selectedRanked, lookupTokenBudget);
+  const budgetedRanked = budgetedSelection.rows;
 
-  const digests = selectedRanked.filter((row) => row.source_kind === "digest").slice(0, limit).map((row) => ({ id: row.id, summary: row.content }));
-  const episodic = selectedRanked.filter((row) => row.source_kind === "episodic").slice(0, limit).map((row) => ({ id: row.id, summary: row.content }));
-  const archival = selectedRanked.filter((row) => row.source_kind === "archival").slice(0, limit).map((row) => ({ id: row.id, reflection: row.content }));
+  const digests = budgetedRanked.filter((row) => row.source_kind === "digest").slice(0, limit).map((row) => ({ id: row.id, summary: row.content }));
+  const episodic = budgetedRanked.filter((row) => row.source_kind === "episodic").slice(0, limit).map((row) => ({ id: row.id, summary: row.content }));
+  const archival = budgetedRanked.filter((row) => row.source_kind === "archival").slice(0, limit).map((row) => ({ id: row.id, reflection: row.content }));
   const currentFacts = db.prepare(
     `SELECT id, subject, predicate, object, valid_from
      FROM agent_memory_facts
@@ -1282,7 +1286,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
   ]
     .sort((left, right) => String(right.valid_to ?? "").localeCompare(String(left.valid_to ?? "")))
     .slice(0, Math.max(limit * 2, 6));
-  const traces: TraceRow[] = selectedRanked.slice(0, Math.max(limit * 3, 8)).map((row) => ({
+  const traces: TraceRow[] = budgetedRanked.slice(0, Math.max(limit * 3, 8)).map((row) => ({
     id: row.id,
     record_kind: row.record_kind ?? "artifact",
     source_kind: row.source_kind,
@@ -1354,6 +1358,11 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
       last_error: refreshState?.last_error ?? null,
       artifact_count: refreshState?.artifact_count ?? rows.length,
       source: refreshState?.source ?? null,
+    },
+    budget: {
+      token_budget: lookupTokenBudget,
+      tokens_used: budgetedSelection.tokensUsed,
+      dropped_results: budgetedSelection.dropped,
     },
     cache: {
       hit: false,
