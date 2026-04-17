@@ -1012,7 +1012,24 @@ async function extractEntities(agentName: string) {
   console.log(JSON.stringify({ extracted: stored, total_entities: result.entities.length, source: result.source }));
 }
 
+const PREFETCH_TTL_SECONDS = 300;
+
+function prefetchQueryHash(agentName: string, query: string, mode: string): string {
+  return hashText(`${agentName}:${query.slice(0, 200)}:${mode}`);
+}
+
 async function lookup(agentName: string, query: string, limit = 3, mode: RetrievalMode = "mix") {
+  const qHash = prefetchQueryHash(agentName, query, mode);
+  const cached = db.prepare(
+    `SELECT result_json FROM agent_memory_prefetch_cache
+     WHERE agent_name = ? AND query_hash = ?
+       AND created_at > datetime('now', '-${PREFETCH_TTL_SECONDS} seconds')`,
+  ).get(agentName, qHash) as { result_json: string } | null;
+  if (cached) {
+    console.log(cached.result_json);
+    return;
+  }
+
   const rows = db.prepare(
     `SELECT si.id, si.record_kind, si.agent_name, si.source_kind, si.content, si.embedding_json,
             COALESCE(a.importance, 'high') AS importance,
@@ -1297,7 +1314,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
     ).all(...topCompactionTraceIds, agentName, ...topCompactionTraceIds) as LinkedLookupRow[];
     linkedArchival = applyLinkedBudget(linkedArchival, linkedBudgetChars);
   }
-  console.log(JSON.stringify({
+  const resultJson = JSON.stringify({
     recentDigests: digests,
     episodic,
     archival,
@@ -1320,7 +1337,38 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
       artifact_count: refreshState?.artifact_count ?? rows.length,
       source: refreshState?.source ?? null,
     },
-  }));
+  });
+  try {
+    db.prepare(
+      `INSERT OR REPLACE INTO agent_memory_prefetch_cache (agent_name, query_hash, result_json)
+       VALUES (?, ?, ?)`,
+    ).run(agentName, qHash, resultJson);
+  } catch {}
+  console.log(resultJson);
+}
+
+async function prefetch(agentName: string) {
+  const jobsDbPath = process.env.AGENT_JOBS_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-jobs.db");
+  let jobsDb: Database | null = null;
+  try {
+    jobsDb = new Database(jobsDbPath, { readonly: true });
+    const jobs = jobsDb.prepare(
+      `SELECT body FROM fleet_internal_jobs
+       WHERE target_agent = ? AND status IN ('pending', 'available')
+       ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, id ASC
+       LIMIT 3`,
+    ).all(agentName) as Array<{ body: string }>;
+    let prefetched = 0;
+    for (const job of jobs) {
+      await lookup(agentName, job.body.slice(0, 600), 3, "mix");
+      prefetched++;
+    }
+    console.log(JSON.stringify({ ok: true, prefetched }));
+  } catch (err) {
+    console.log(JSON.stringify({ ok: false, error: String(err) }));
+  } finally {
+    try { jobsDb?.close(); } catch {}
+  }
 }
 
 function invalidate(agentName: string, query: string, relationPrefix: string | null = null) {
@@ -1814,6 +1862,12 @@ if (cmd === "refresh") {
   const modeArg = Bun.argv[6];
   const mode: RetrievalMode = modeArg === "local" || modeArg === "global" || modeArg === "mix" ? modeArg : "mix";
   await lookup(arg1, arg2, Math.max(1, parseInt(Bun.argv[5] || "3", 10) || 3), mode);
+} else if (cmd === "prefetch") {
+  if (!arg1) {
+    console.error("Usage: agent-memory prefetch <agent>");
+    process.exit(64);
+  }
+  await prefetch(arg1);
 } else if (cmd === "invalidate") {
   if (!arg1 || !arg2) {
     console.error("Usage: agent-memory invalidate <agent> <query> [relationPrefix]");
