@@ -20,6 +20,12 @@ export type MemoryItemRef = {
   content: string;
 };
 
+export type ConsolidatedFactMatch = {
+  sourceItemId: number;
+  fact: DerivedFact;
+  entityCount: number;
+};
+
 function normalize(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -66,6 +72,28 @@ function matchScore(item: MemoryItemRef, entity: EntityTuple): number {
   return score;
 }
 
+function canonicalTupleKey(entity: Pick<EntityTuple, "subject" | "predicate" | "object">): string {
+  return [
+    normalizeForMatch(entity.subject),
+    normalizeForMatch(entity.predicate),
+    normalizeForMatch(entity.object),
+  ].join("|");
+}
+
+function entitySpecificity(entity: EntityTuple): number {
+  return normalize(entity.description ?? "").length + normalize(`${entity.subject} ${entity.predicate} ${entity.object}`).length;
+}
+
+function mergeEvidence(existing: string, next: string): string {
+  const parts = new Set(
+    [existing, next]
+      .flatMap((value) => value.split(/\s+\|\s+/))
+      .map((value) => normalize(value))
+      .filter(Boolean),
+  );
+  return Array.from(parts).slice(0, 3).join(" | ");
+}
+
 export function matchEntityToItem(items: MemoryItemRef[], entity: EntityTuple): MemoryItemRef | null {
   let best: MemoryItemRef | null = null;
   let bestScore = 0;
@@ -77,6 +105,62 @@ export function matchEntityToItem(items: MemoryItemRef[], entity: EntityTuple): 
     }
   }
   return bestScore >= 0.45 ? best : null;
+}
+
+export function consolidateExtractedFacts(
+  items: MemoryItemRef[],
+  entities: EntityTuple[],
+): ConsolidatedFactMatch[] {
+  const grouped = new Map<string, { sourceItemId: number; fact: DerivedFact; score: number; entityCount: number }>();
+
+  for (const entity of entities) {
+    const bestMatch = matchEntityToItem(items, entity);
+    if (!bestMatch) continue;
+
+    const key = canonicalTupleKey(entity);
+    const evidence = normalize(entity.description || `${entity.subject} ${entity.predicate} ${entity.object}`);
+    const score = matchScore(bestMatch, entity);
+    const current = grouped.get(key);
+
+    if (!current) {
+      grouped.set(key, {
+        sourceItemId: bestMatch.id,
+        fact: {
+          subject: normalize(entity.subject),
+          predicate: normalize(entity.predicate),
+          object: normalize(entity.object),
+          evidence,
+        },
+        score,
+        entityCount: 1,
+      });
+      continue;
+    }
+
+    current.entityCount += 1;
+    current.fact.evidence = mergeEvidence(current.fact.evidence, evidence);
+
+    const currentSpecificity = entitySpecificity({
+      subject: current.fact.subject,
+      predicate: current.fact.predicate,
+      object: current.fact.object,
+      description: current.fact.evidence,
+    });
+    const candidateSpecificity = entitySpecificity(entity);
+    if (score > current.score || (score === current.score && candidateSpecificity > currentSpecificity)) {
+      current.sourceItemId = bestMatch.id;
+      current.score = score;
+      current.fact.subject = normalize(entity.subject);
+      current.fact.predicate = normalize(entity.predicate);
+      current.fact.object = normalize(entity.object);
+    }
+  }
+
+  return Array.from(grouped.values()).map(({ sourceItemId, fact, entityCount }) => ({
+    sourceItemId,
+    fact,
+    entityCount,
+  }));
 }
 
 export function deriveFacts(agentName: string, facts: string[], decisions: string[]): DerivedFact[] {

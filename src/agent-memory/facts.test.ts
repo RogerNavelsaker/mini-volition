@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { matchEntityToItem } from "./facts";
+import { consolidateExtractedFacts, matchEntityToItem } from "./facts";
 
 describe("matchEntityToItem", () => {
   const items = [
@@ -39,5 +39,56 @@ describe("matchEntityToItem", () => {
     });
 
     expect(match).toBeNull();
+  });
+});
+
+describe("consolidateExtractedFacts", () => {
+  const items = [
+    { id: 10, item_kind: "fact", content: "GitHub Actions uses bun standalone executables for release artifacts." },
+    { id: 11, item_kind: "fact", content: "Release artifacts are produced by GitHub Actions with bun standalone executables." },
+    { id: 12, item_kind: "decision", content: "Use nix flake builds for reproducible source builds." },
+  ];
+
+  test("collapses duplicate tuples that only differ by casing or phrasing", () => {
+    const facts = consolidateExtractedFacts(items, [
+      {
+        subject: "GitHub Actions",
+        predicate: "uses",
+        object: "bun standalone executables",
+        description: "GitHub Actions uses bun standalone executables for release artifacts",
+      },
+      {
+        subject: "github actions",
+        predicate: "USES",
+        object: "bun standalone executables",
+        description: "release artifacts are produced by GitHub Actions with bun standalone executables",
+      },
+    ]);
+
+    expect(facts).toHaveLength(1);
+    expect(facts[0]?.sourceItemId).toBe(10);
+    expect(facts[0]?.entityCount).toBe(2);
+    expect(facts[0]?.fact.evidence).toContain("GitHub Actions uses bun standalone executables for release artifacts");
+    expect(facts[0]?.fact.evidence).toContain("release artifacts are produced by GitHub Actions with bun standalone executables");
+  });
+
+  test("keeps distinct tuples separate", () => {
+    const facts = consolidateExtractedFacts(items, [
+      {
+        subject: "GitHub Actions",
+        predicate: "uses",
+        object: "bun standalone executables",
+        description: "GitHub Actions uses bun standalone executables for release artifacts",
+      },
+      {
+        subject: "nix flake builds",
+        predicate: "provide",
+        object: "reproducible source builds",
+        description: "Use nix flake builds for reproducible source builds",
+      },
+    ]);
+
+    expect(facts).toHaveLength(2);
+    expect(facts.map((entry) => entry.sourceItemId).sort((a, b) => a - b)).toEqual([10, 12]);
   });
 });

@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 import { selectCompactionCandidates } from "./compaction";
 import { relationForItemKinds, upsertMemoryLink, invalidateMemoryLinks, timelineQueryTokens } from "./links";
-import { deriveFacts, invalidateMemoryFacts, matchEntityToItem, upsertMemoryFact } from "./facts";
+import { consolidateExtractedFacts, deriveFacts, invalidateMemoryFacts, upsertMemoryFact } from "./facts";
 import { ensureSchema } from "./schema";
 import { appendMemoryArtifact, appendMemorySourceArtifact } from "../state-artifacts/lib";
 import type {
@@ -919,20 +919,15 @@ async function compact(agentName: string) {
     const createdByKind = new Map(createdItems.map((item) => [`${item.item_kind}:${item.content}`, item.id]));
     const extractionText = createdItems.map((item) => `${item.item_kind}: ${item.content}`).join("\n");
     const extracted = await requestExtractEntities(extractionText);
+    const consolidatedFacts = extracted?.entities?.length ? consolidateExtractedFacts(createdItems, extracted.entities) : [];
     const derivedFacts = extracted?.entities?.length
-      ? extracted.entities.map((e) => ({ subject: e.subject, predicate: e.predicate, object: e.object, evidence: e.description || `${e.subject} ${e.predicate} ${e.object}` }))
+      ? consolidatedFacts.map((entry) => entry.fact)
       : deriveFacts(agentName, compacted.facts, compacted.decisions);
-    for (const fact of derivedFacts) {
+    for (const [index, fact] of derivedFacts.entries()) {
       // For LLM-extracted entities, find best matching source item; for regex, use original evidence key
       let sourceItemId: number | undefined;
-      if (extracted?.entities?.length) {
-        const bestMatch = matchEntityToItem(createdItems, {
-          subject: fact.subject,
-          predicate: fact.predicate,
-          object: fact.object,
-          description: fact.evidence,
-        });
-        sourceItemId = bestMatch?.id;
+      if (consolidatedFacts.length > 0) {
+        sourceItemId = consolidatedFacts[index]?.sourceItemId;
       } else {
         const sourceKey = compacted.facts.includes(fact.evidence) ? `fact:${fact.evidence}` : `decision:${fact.evidence}`;
         sourceItemId = createdByKind.get(sourceKey);
@@ -1016,20 +1011,14 @@ async function extractEntities(agentName: string) {
     return;
   }
   let stored = 0;
-  for (const entity of result.entities) {
-    const bestMatch = matchEntityToItem(unextracted, entity);
-    if (!bestMatch) continue;
-    upsertMemoryFact(db, agentName, bestMatch.id, {
-      subject: entity.subject,
-      predicate: entity.predicate,
-      object: entity.object,
-      evidence: entity.description || `${entity.subject} ${entity.predicate} ${entity.object}`,
-    });
-    const factText = `${entity.subject} ${entity.predicate} ${entity.object}`;
+  const consolidatedFacts = consolidateExtractedFacts(unextracted, result.entities);
+  for (const entry of consolidatedFacts) {
+    upsertMemoryFact(db, agentName, entry.sourceItemId, entry.fact);
+    const factText = `${entry.fact.subject} ${entry.fact.predicate} ${entry.fact.object}`;
     const factId = db.prepare(
       `SELECT id FROM agent_memory_facts
        WHERE agent_name = ? AND source_item_id = ? AND subject = ? AND predicate = ? AND object = ?`,
-    ).get(agentName, bestMatch.id, entity.subject, entity.predicate, entity.object) as { id: number } | null;
+    ).get(agentName, entry.sourceItemId, entry.fact.subject, entry.fact.predicate, entry.fact.object) as { id: number } | null;
     if (factId?.id) {
       upsertSearchIndex("fact", factId.id, agentName, "archival", factText, null);
       appendMemoryArtifact(agentName, {
@@ -1040,7 +1029,7 @@ async function extractEntities(agentName: string) {
       stored++;
     }
   }
-  console.log(JSON.stringify({ extracted: stored, total_entities: result.entities.length, source: result.source }));
+  console.log(JSON.stringify({ extracted: stored, consolidated: consolidatedFacts.length, total_entities: result.entities.length, source: result.source }));
 }
 
 async function lookup(agentName: string, query: string, limit = 3, mode: RetrievalMode = "mix") {
