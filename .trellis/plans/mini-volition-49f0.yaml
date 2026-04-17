@@ -2,8 +2,10 @@ id: mini-volition-49f0
 title: Subscription State Database
 seed: mini-volition-49f0
 spec: mini-volition-49f0
-status: active
+status: done
 createdAt: "2026-04-15T20:40:56.626Z"
-updatedAt: "2026-04-15T20:40:56.626Z"
+updatedAt: "2026-04-17T17:07:22.283Z"
+completedAt: "2026-04-17T17:07:22.282Z"
+completionSummary: Added subscription state storage and CLI commands in agent-state, wired rebuild/verify support, documented usage, and validated with tests plus a full build.
 summary: Plan to address Subscription State Database
 steps:
