@@ -114,7 +114,7 @@ function validateRuntimeTransition(previous: RuntimeStatus | null, next: Runtime
 }
 
 function usage(): never {
-  console.error("Usage: agent-state <get|set|subscription-get|subscription-set|subscription-list|record-action|record-actions-batch|record-turn-events-batch|rebuild|verify|list-actions|list-turns|list-checkpoints|get-checkpoint|recover-turns|review-turns|resolve-turn|replay-turn> ...");
+  console.error("Usage: agent-state <get|set|subscription-get|subscription-set|subscription-list|proposal-create|proposal-get|proposal-list|vote-cast|vote-list|record-action|record-actions-batch|record-turn-events-batch|rebuild|verify|list-actions|list-turns|list-checkpoints|get-checkpoint|recover-turns|review-turns|resolve-turn|replay-turn> ...");
   process.exit(64);
 }
 
@@ -150,6 +150,8 @@ function rebuildState(agent?: string) {
       db.prepare("DELETE FROM fleet_turn_journal WHERE agent_name = ?").run(name);
       db.prepare("DELETE FROM fleet_turn_checkpoints WHERE agent_name = ?").run(name);
       db.prepare("DELETE FROM fleet_channel_subscriptions WHERE agent_name = ?").run(name);
+      db.prepare("DELETE FROM fleet_consensus_votes WHERE voter_agent = ?").run(name);
+      db.prepare("DELETE FROM fleet_consensus_proposals WHERE proposer_agent = ?").run(name);
 
       const runtimeRows = readJsonl(stateDir("runtime", `${name}.jsonl`));
       const actionRows = readJsonl(stateDir("actions", `${name}.jsonl`));
@@ -227,7 +229,28 @@ function rebuildState(agent?: string) {
          ON CONFLICT(agent_name, channel) DO UPDATE SET
            status = excluded.status,
            resume_at = excluded.resume_at,
-           note = excluded.note,
+            note = excluded.note,
+            updated_at = excluded.updated_at`,
+      );
+      const upsertProposal = db.prepare(
+        `INSERT INTO fleet_consensus_proposals (
+           id, proposer_agent, topic, body, strategy, status, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           proposer_agent = excluded.proposer_agent,
+           topic = excluded.topic,
+           body = excluded.body,
+           strategy = excluded.strategy,
+           status = excluded.status,
+           updated_at = excluded.updated_at`,
+      );
+      const upsertVote = db.prepare(
+        `INSERT INTO fleet_consensus_votes (
+           proposal_id, voter_agent, vote, rationale, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(proposal_id, voter_agent) DO UPDATE SET
+           vote = excluded.vote,
+           rationale = excluded.rationale,
            updated_at = excluded.updated_at`,
       );
       for (const row of turnRows) {
@@ -277,6 +300,35 @@ function rebuildState(agent?: string) {
           ts,
         );
       }
+      for (const row of runtimeRows) {
+        const ts = String(row.recorded_at ?? new Date().toISOString());
+        if (row.record_type === "proposal_state") {
+          const proposalId = Number(row.proposal_id ?? 0);
+          if (!proposalId) continue;
+          upsertProposal.run(
+            proposalId,
+            String(row.proposer_agent ?? name),
+            String(row.topic ?? ""),
+            String(row.body ?? ""),
+            row.strategy ?? "majority",
+            String(row.status ?? "open"),
+            row.created_at ?? ts,
+            ts,
+          );
+        } else if (row.record_type === "vote_state") {
+          const proposalId = Number(row.proposal_id ?? 0);
+          const voterAgent = String(row.voter_agent ?? name);
+          if (!proposalId || !voterAgent) continue;
+          upsertVote.run(
+            proposalId,
+            voterAgent,
+            String(row.vote ?? "abstain"),
+            row.rationale ?? null,
+            row.created_at ?? ts,
+            ts,
+          );
+        }
+      }
 
       summary.push({
         agent: name,
@@ -323,6 +375,19 @@ function verifyState(agent?: string) {
     }
     const expectedSubscriptions = latestSubscriptions.size;
     const actualSubscriptionCount = Number((db.prepare("SELECT COUNT(*) AS count FROM fleet_channel_subscriptions WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0);
+    const latestProposals = new Map<number, Record<string, unknown>>();
+    let expectedVoteCount = 0;
+    for (const row of readJsonl(stateDir("runtime", `${name}.jsonl`))) {
+      if (row.record_type === "proposal_state") {
+        const proposalId = Number(row.proposal_id ?? 0);
+        if (proposalId) latestProposals.set(proposalId, row);
+      } else if (row.record_type === "vote_state") {
+        expectedVoteCount += 1;
+      }
+    }
+    const expectedProposalCount = latestProposals.size;
+    const actualProposalCount = Number((db.prepare("SELECT COUNT(*) AS count FROM fleet_consensus_proposals WHERE proposer_agent = ?").get(name) as { count: number } | null)?.count ?? 0);
+    const actualVoteCount = Number((db.prepare("SELECT COUNT(*) AS count FROM fleet_consensus_votes WHERE voter_agent = ?").get(name) as { count: number } | null)?.count ?? 0);
     const runtimeDrift = expectedRuntime
       ? {
           status: expectedRuntime.status !== actualRuntime?.status,
@@ -366,6 +431,8 @@ function verifyState(agent?: string) {
       actualPhaseCount !== expectedPhaseCount ? `turn-phase count drift: expected ${expectedPhaseCount}, actual ${actualPhaseCount}` : null,
       actualCheckpointCount !== expectedCheckpointCount ? `checkpoint count drift: expected ${expectedCheckpointCount}, actual ${actualCheckpointCount}` : null,
       actualSubscriptionCount !== expectedSubscriptions ? `subscription count drift: expected ${expectedSubscriptions}, actual ${actualSubscriptionCount}` : null,
+      actualProposalCount !== expectedProposalCount ? `proposal count drift: expected ${expectedProposalCount}, actual ${actualProposalCount}` : null,
+      actualVoteCount !== expectedVoteCount ? `vote count drift: expected ${expectedVoteCount}, actual ${actualVoteCount}` : null,
       runtimeDrift && Object.entries(runtimeDrift).filter(([, drift]) => drift).map(([field]) => `runtime field drift: ${field}`).join(", "),
       ...actionContentDrift.map((d) => `action content drift: ${d}`),
     ].filter(Boolean);
@@ -375,6 +442,8 @@ function verifyState(agent?: string) {
         && actualPhaseCount === expectedPhaseCount
         && actualCheckpointCount === expectedCheckpointCount
         && actualSubscriptionCount === expectedSubscriptions
+        && actualProposalCount === expectedProposalCount
+        && actualVoteCount === expectedVoteCount
         && (!runtimeDrift || !Object.values(runtimeDrift).some(Boolean))
         && actionContentDrift.length === 0,
       expected: {
@@ -389,6 +458,8 @@ function verifyState(agent?: string) {
         turn_phases: actualPhaseCount,
         checkpoints: actualCheckpointCount,
         subscriptions: actualSubscriptionCount,
+        proposals: actualProposalCount,
+        votes: actualVoteCount,
       },
       runtime_drift: runtimeDrift,
       runtime_drift_detail: Object.keys(runtimeDriftDetail).length > 0 ? runtimeDriftDetail : null,
@@ -466,6 +537,26 @@ function ensureSchema() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (agent_name, channel)
+  );`);
+  db.run(`CREATE TABLE IF NOT EXISTS fleet_consensus_proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposer_agent TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    body TEXT NOT NULL,
+    strategy TEXT NOT NULL DEFAULT 'majority',
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+  db.run(`CREATE TABLE IF NOT EXISTS fleet_consensus_votes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id INTEGER NOT NULL,
+    voter_agent TEXT NOT NULL,
+    vote TEXT NOT NULL,
+    rationale TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(proposal_id, voter_agent)
   );`);
 }
 
@@ -815,6 +906,88 @@ if (cmd === "get") {
   const result = db
     .prepare("SELECT agent_name, channel, status, resume_at, note, created_at, updated_at FROM fleet_channel_subscriptions WHERE agent_name = ? ORDER BY channel ASC")
     .all(arg1);
+  console.log(JSON.stringify(result));
+} else if (cmd === "proposal-create") {
+  if (!arg1 || !arg2 || !Bun.argv[5]) {
+    console.error("Usage: agent-state proposal-create <proposerAgent> <topic> <body> [strategy] [status]");
+    process.exit(64);
+  }
+  const strategy = nullableArg(Bun.argv[6]) ?? "majority";
+  const status = nullableArg(Bun.argv[7]) ?? "open";
+  db.run(
+    `INSERT INTO fleet_consensus_proposals (proposer_agent, topic, body, strategy, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    [arg1, arg2, Bun.argv[5], strategy, status],
+  );
+  const proposal = db.prepare("SELECT * FROM fleet_consensus_proposals WHERE id = last_insert_rowid()").get() as Record<string, unknown> | null;
+  appendRuntimeArtifact(arg1, {
+    record_type: "proposal_state",
+    proposal_id: proposal?.id ?? null,
+    proposer_agent: arg1,
+    topic: arg2,
+    body: Bun.argv[5],
+    strategy,
+    status,
+    created_at: proposal?.created_at ?? null,
+  });
+  console.log(JSON.stringify(proposal ?? null));
+} else if (cmd === "proposal-get") {
+  if (!arg1) {
+    console.error("Usage: agent-state proposal-get <proposalId>");
+    process.exit(64);
+  }
+  const proposalId = Number(arg1);
+  const result = db.prepare("SELECT * FROM fleet_consensus_proposals WHERE id = ? LIMIT 1").get(proposalId);
+  console.log(JSON.stringify(result ?? null));
+} else if (cmd === "proposal-list") {
+  const status = nullableArg(arg1);
+  const limit = Math.max(1, parseInt(arg2 || "20", 10) || 20);
+  const result = status
+    ? db.prepare("SELECT * FROM fleet_consensus_proposals WHERE status = ? ORDER BY id DESC LIMIT ?").all(status, limit)
+    : db.prepare("SELECT * FROM fleet_consensus_proposals ORDER BY id DESC LIMIT ?").all(limit);
+  console.log(JSON.stringify(result));
+} else if (cmd === "vote-cast") {
+  if (!arg1 || !arg2 || !Bun.argv[5]) {
+    console.error("Usage: agent-state vote-cast <proposalId> <voterAgent> <approve|reject|abstain> [rationale]");
+    process.exit(64);
+  }
+  const proposalId = Number(arg1);
+  const vote = Bun.argv[5];
+  if (!proposalId) {
+    console.error("proposalId must be a positive integer");
+    process.exit(64);
+  }
+  if (vote !== "approve" && vote !== "reject" && vote !== "abstain") {
+    console.error("vote must be approve, reject, or abstain");
+    process.exit(64);
+  }
+  const rationale = nullableArg(Bun.argv[6]);
+  db.run(
+    `INSERT INTO fleet_consensus_votes (proposal_id, voter_agent, vote, rationale, created_at, updated_at)
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(proposal_id, voter_agent) DO UPDATE SET
+       vote = excluded.vote,
+       rationale = excluded.rationale,
+       updated_at = CURRENT_TIMESTAMP`,
+    [proposalId, arg2, vote, rationale],
+  );
+  const record = db.prepare("SELECT * FROM fleet_consensus_votes WHERE proposal_id = ? AND voter_agent = ? LIMIT 1").get(proposalId, arg2);
+  appendRuntimeArtifact(arg2, {
+    record_type: "vote_state",
+    proposal_id: proposalId,
+    voter_agent: arg2,
+    vote,
+    rationale,
+    created_at: (record as Record<string, unknown> | null)?.created_at ?? null,
+  });
+  console.log(JSON.stringify(record ?? null));
+} else if (cmd === "vote-list") {
+  if (!arg1) {
+    console.error("Usage: agent-state vote-list <proposalId>");
+    process.exit(64);
+  }
+  const proposalId = Number(arg1);
+  const result = db.prepare("SELECT * FROM fleet_consensus_votes WHERE proposal_id = ? ORDER BY voter_agent ASC").all(proposalId);
   console.log(JSON.stringify(result));
 } else if (cmd === "record-action") {
   if (!arg1 || !arg2 || !Bun.argv[5] || !Bun.argv[6]) {
