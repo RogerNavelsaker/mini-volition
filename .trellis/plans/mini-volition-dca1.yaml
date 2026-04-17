@@ -2,8 +2,10 @@ id: mini-volition-dca1
 title: Archival Promotion Summarizer
 seed: mini-volition-dca1
 spec: mini-volition-dca1
-status: active
+status: done
 createdAt: "2026-04-15T20:40:55.730Z"
-updatedAt: "2026-04-15T20:40:55.730Z"
+updatedAt: "2026-04-17T21:54:28.943Z"
+completedAt: "2026-04-17T21:54:28.940Z"
+completionSummary: Extended agent-memory archival promotion to include tier0 verbatim fragments, added tested compaction selection rules for verbatim candidates, and fixed requestCompact to use the configured medium inference socket.
 summary: Plan to address Archival Promotion Summarizer
 steps:
