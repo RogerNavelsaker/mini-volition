@@ -1283,6 +1283,7 @@ function completeMailBurst(messageIds: number[]) {
   const ids = [...new Set(messageIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
   if (ids.length === 0) return;
   runJsonCommand(mailBin, ["complete-burst", ...ids.map(String)]);
+  runJsonCommand("fleet", ["log-event", "burst_flushed", name!, JSON.stringify({ message_ids: ids, count: ids.length })]);
 }
 
 function reclaimStaleMailClaims() {

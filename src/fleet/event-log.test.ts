@@ -90,4 +90,16 @@ describe("fleet_event_log append-only semantics", () => {
     const count = (db.prepare(`SELECT COUNT(*) AS n FROM fleet_event_log`).get() as { n: number }).n;
     expect(count).toBe(5);
   });
+
+  it("burst_flushed payload stores message_ids and count", () => {
+    const payload = JSON.stringify({ message_ids: [1, 2, 3], count: 3 });
+    insert(db, "burst_flushed", "agent-a", payload);
+    const row = db.prepare(
+      `SELECT payload_json FROM fleet_event_log WHERE event_type = 'burst_flushed'`,
+    ).get() as { payload_json: string } | null;
+    expect(row).not.toBeNull();
+    const parsed = JSON.parse(row!.payload_json);
+    expect(parsed.message_ids).toEqual([1, 2, 3]);
+    expect(parsed.count).toBe(3);
+  });
 });
