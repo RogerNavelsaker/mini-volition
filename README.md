@@ -69,12 +69,14 @@ fleet restart                      # terminus + genesis
 
 # operations
 fleet status                       # show binary/db/socket readiness
+fleet heartbeat-check [activeSec] [latentSec] [notificationAgent] [channelName]
 fleet governor-status              # show per-agent governor state
 fleet verify-governor              # check governor projection drift
 
 # per-domain inspection/repair
 agent-state verify [agent]         # check turn/action projection drift
 agent-state rebuild [agent]        # rebuild from state/ JSONL
+agent-state health-set <agent> <active|latent|dead>
 agent-state subscription-list <agent>
 agent-state subscription-get <agent> <channel>
 agent-state subscription-set <agent> <channel> <subscribed|unsubscribed> [resumeAt] [note]

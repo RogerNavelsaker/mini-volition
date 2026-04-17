@@ -43,6 +43,8 @@ type RuntimeStateRow = {
   cooldown_until: string | null;
   last_message_id: number | null;
 };
+const HEALTH_STATUSES = ["active", "latent", "dead"] as const;
+type HealthStatus = (typeof HEALTH_STATUSES)[number];
 const ALLOWED_STATUS_TRANSITIONS: Record<RuntimeStatus, Set<RuntimeStatus>> = {
   idle: new Set(["idle", "thinking", "cooldown", "error"]),
   thinking: new Set(["thinking", "idle", "cooldown", "sleeping", "rate_limited", "error"]),
@@ -54,6 +56,10 @@ const ALLOWED_STATUS_TRANSITIONS: Record<RuntimeStatus, Set<RuntimeStatus>> = {
 
 function isRuntimeStatus(value: string): value is RuntimeStatus {
   return (RUNTIME_STATUSES as readonly string[]).includes(value);
+}
+
+function isHealthStatus(value: string): value is HealthStatus {
+  return (HEALTH_STATUSES as readonly string[]).includes(value);
 }
 
 function normalizeRuntimeState(
@@ -114,7 +120,7 @@ function validateRuntimeTransition(previous: RuntimeStatus | null, next: Runtime
 }
 
 function usage(): never {
-  console.error("Usage: agent-state <get|set|subscription-get|subscription-set|subscription-list|notification-get|notification-set|notification-list|proposal-create|proposal-get|proposal-list|vote-cast|vote-list|ghost-get|ghost-set|ghost-clear|record-action|record-actions-batch|record-turn-events-batch|rebuild|verify|list-actions|list-turns|list-checkpoints|get-checkpoint|recover-turns|review-turns|resolve-turn|replay-turn> ...");
+  console.error("Usage: agent-state <get|set|health-set|subscription-get|subscription-set|subscription-list|notification-get|notification-set|notification-list|proposal-create|proposal-get|proposal-list|vote-cast|vote-list|ghost-get|ghost-set|ghost-clear|record-action|record-actions-batch|record-turn-events-batch|rebuild|verify|list-actions|list-turns|list-checkpoints|get-checkpoint|recover-turns|review-turns|resolve-turn|replay-turn> ...");
   process.exit(64);
 }
 
@@ -559,6 +565,11 @@ function ensureSchema() {
     last_message_id INTEGER,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
+  const agentStateColumns = db.prepare("PRAGMA table_info(fleet_agent_state)").all() as Array<{ name: string }>;
+  const hasHealthStatus = agentStateColumns.some((column) => column.name === "health_status");
+  const hasHealthUpdatedAt = agentStateColumns.some((column) => column.name === "health_updated_at");
+  if (!hasHealthStatus) db.run("ALTER TABLE fleet_agent_state ADD COLUMN health_status TEXT NOT NULL DEFAULT 'dead'");
+  if (!hasHealthUpdatedAt) db.run("ALTER TABLE fleet_agent_state ADD COLUMN health_updated_at DATETIME");
   db.run(`CREATE TABLE IF NOT EXISTS fleet_agent_action_journal (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_name TEXT NOT NULL,
@@ -956,6 +967,24 @@ if (cmd === "get") {
     cooldown_until: normalized.cooldown_until,
     last_message_id: normalized.last_message_id,
   });
+} else if (cmd === "health-set") {
+  if (!arg1 || !arg2 || !isHealthStatus(arg2)) {
+    console.error("Usage: agent-state health-set <agent> <active|latent|dead>");
+    process.exit(64);
+  }
+  db.run(
+    `INSERT INTO fleet_agent_state (
+       agent_name, status, current_task, wake_reason, last_error, cooldown_until, last_message_id, health_status, health_updated_at, updated_at
+     ) VALUES (?, 'idle', NULL, NULL, NULL, NULL, NULL, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(agent_name) DO UPDATE SET
+       health_status = excluded.health_status,
+       health_updated_at = CURRENT_TIMESTAMP`,
+    [arg1, arg2],
+  );
+  const result = db.prepare(
+    "SELECT agent_name, status, health_status, updated_at, health_updated_at FROM fleet_agent_state WHERE agent_name = ? LIMIT 1",
+  ).get(arg1);
+  console.log(JSON.stringify(result ?? null));
 } else if (cmd === "subscription-get") {
   if (!arg1 || !arg2) {
     console.error("Usage: agent-state subscription-get <agent> <channel>");

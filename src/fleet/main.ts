@@ -187,7 +187,7 @@ function generateKdl(): string {
 }
 
 function usage(): never {
-  console.error("Usage: bin/fleet <genesis|start|attach|detach|stop|terminus|up|down|restart|status|governor-status|governor-bump|governor-force|rebuild-governor|verify-governor>");
+  console.error("Usage: bin/fleet <genesis|start|attach|detach|stop|terminus|up|down|restart|status|heartbeat-check|governor-status|governor-bump|governor-force|rebuild-governor|verify-governor>");
   process.exit(64);
 }
 
@@ -346,6 +346,17 @@ type SocketHeartbeat = {
   now: string;
 };
 
+type HealthStatus = "active" | "latent" | "dead";
+
+type AgentHealthSnapshot = {
+  agent_name: string;
+  runtime_status: string | null;
+  runtime_updated_at: string | null;
+  health_status: HealthStatus;
+  stale_ms: number | null;
+  alert_sent: boolean;
+};
+
 function requestSocketHeartbeat(socketPath: string, timeoutMs = 750): Promise<SocketHeartbeat | null> {
   return new Promise((resolve) => {
     if (!accessSafe(socketPath)) {
@@ -443,7 +454,14 @@ function withDb<T>(fn: (db: Database) => T): T {
     window_started_at DATETIME,
     turn_count INTEGER DEFAULT 0,
     forced_cooldown_until DATETIME,
-    last_reason TEXT,
+     last_reason TEXT,
+     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+   );`);
+  db.run(`CREATE TABLE IF NOT EXISTS fleet_health_alerts (
+    agent_name TEXT PRIMARY KEY,
+    health_status TEXT NOT NULL,
+    runtime_updated_at DATETIME,
+    last_alerted_at DATETIME,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
   try {
@@ -453,8 +471,103 @@ function withDb<T>(fn: (db: Database) => T): T {
   }
 }
 
+function withStateDb<T>(fn: (db: Database) => T): T {
+  const db = new Database(stateDb);
+  db.exec("PRAGMA busy_timeout = 5000;");
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA synchronous = NORMAL;");
+  try {
+    return fn(db);
+  } finally {
+    db.close();
+  }
+}
+
 function isoAfterSeconds(seconds: number): string {
+  // ISO date after N seconds
   return new Date(Date.now() + (seconds * 1000)).toISOString();
+}
+
+function classifyHealthStatus(updatedAt: string | null, activeMs: number, latentMs: number): { status: HealthStatus; staleMs: number | null } {
+  if (!updatedAt) return { status: "dead", staleMs: null };
+  const updatedAtMs = new Date(updatedAt.endsWith("Z") ? updatedAt : `${updatedAt}Z`).getTime();
+  if (!Number.isFinite(updatedAtMs)) return { status: "dead", staleMs: null };
+  const staleMs = Math.max(0, Date.now() - updatedAtMs);
+  if (staleMs <= activeMs) return { status: "active", staleMs };
+  if (staleMs <= latentMs) return { status: "latent", staleMs };
+  return { status: "dead", staleMs };
+}
+
+function sendHealthAlert(notificationAgent: string, channelName: string, snapshot: AgentHealthSnapshot) {
+  const body = `[HEALTH ALERT] ${snapshot.agent_name} is ${snapshot.health_status}; last_runtime_at=${snapshot.runtime_updated_at ?? "never"}${snapshot.stale_ms == null ? "" : ` stale_ms=${snapshot.stale_ms}`}${snapshot.runtime_status ? ` runtime_status=${snapshot.runtime_status}` : ""}`;
+  const env = {
+    ...process.env,
+    META_REPO_ROOT: fleetRoot,
+    AGENT_MAIL_DB: mailDb,
+    AGENT_STATE_DB: stateDb,
+    AGENT_NAME: "fleet",
+  };
+  const notifyResult = spawnSync([mailBin, "notify", notificationAgent, channelName, body], {
+    env,
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  if (notifyResult.exitCode === 0) return;
+  spawnSync([mailBin, "send", notificationAgent, "urgent", body], {
+    env,
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+}
+
+function heartbeatCheck(activeSec: number, latentSec: number, notificationAgent: string, channelName: string) {
+  const activeMs = Math.max(1, activeSec) * 1000;
+  const latentMs = Math.max(activeMs, latentSec * 1000);
+  const agents = loadConfig().agents.map((agent) => agent.name);
+  const baseSnapshots = withStateDb((db) => agents.map((agentName) => {
+    const row = db.prepare(
+      "SELECT agent_name, status, updated_at FROM fleet_agent_state WHERE agent_name = ? LIMIT 1",
+    ).get(agentName) as { agent_name: string; status: string | null; updated_at: string | null } | null;
+    const health = classifyHealthStatus(row?.updated_at ?? null, activeMs, latentMs);
+    return {
+      agent_name: agentName,
+      runtime_status: row?.status ?? null,
+      runtime_updated_at: row?.updated_at ?? null,
+      health_status: health.status,
+      stale_ms: health.staleMs,
+      alert_sent: false,
+    } satisfies AgentHealthSnapshot;
+  }));
+
+  for (const snapshot of baseSnapshots) {
+    spawnSync([agentStateBin, "health-set", snapshot.agent_name, snapshot.health_status], {
+      env: { ...process.env, META_REPO_ROOT: fleetRoot, AGENT_STATE_DB: stateDb },
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+  }
+
+  return withDb((db) => {
+    const snapshots = baseSnapshots.map((snapshot) => {
+      const previous = db.prepare(
+        "SELECT health_status FROM fleet_health_alerts WHERE agent_name = ? LIMIT 1",
+      ).get(snapshot.agent_name) as { health_status: string } | null;
+      const shouldAlert = snapshot.health_status === "dead" && previous?.health_status !== "dead";
+      if (shouldAlert) sendHealthAlert(notificationAgent, channelName, snapshot);
+      db.run(
+        `INSERT INTO fleet_health_alerts (agent_name, health_status, runtime_updated_at, last_alerted_at, updated_at)
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(agent_name) DO UPDATE SET
+           health_status = excluded.health_status,
+           runtime_updated_at = excluded.runtime_updated_at,
+           last_alerted_at = COALESCE(excluded.last_alerted_at, fleet_health_alerts.last_alerted_at),
+           updated_at = CURRENT_TIMESTAMP`,
+        [snapshot.agent_name, snapshot.health_status, snapshot.runtime_updated_at, shouldAlert ? new Date().toISOString() : null],
+      );
+      return { ...snapshot, alert_sent: shouldAlert };
+    });
+    return { checked_at: new Date().toISOString(), active_sec: activeSec, latent_sec: latentSec, agents: snapshots };
+  });
 }
 
 function currentGovernor(db: Database, agent: string) {
@@ -708,6 +821,14 @@ switch (process.argv[2]) {
     break;
   case "status":
     await showStatus();
+    break;
+  case "heartbeat-check":
+    console.log(JSON.stringify(heartbeatCheck(
+      Math.max(1, parseInt(process.argv[3] || "60", 10) || 60),
+      Math.max(1, parseInt(process.argv[4] || "300", 10) || 300),
+      process.argv[5] || "operator",
+      process.argv[6] || "health-alerts",
+    )));
     break;
   case "governor-status":
     console.log(JSON.stringify(governorStatus(process.argv[3] || "", Math.max(1, parseInt(process.argv[4] || "120", 10) || 120), Math.max(1, parseInt(process.argv[5] || "4", 10) || 4))));
