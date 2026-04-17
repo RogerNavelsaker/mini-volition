@@ -2,8 +2,10 @@ id: mini-volition-a835
 title: Notification Channel Integration
 seed: mini-volition-a835
 spec: mini-volition-a835
-status: active
+status: done
 createdAt: "2026-04-15T20:40:55.029Z"
-updatedAt: "2026-04-15T20:40:55.029Z"
+updatedAt: "2026-04-17T21:33:21.168Z"
+completedAt: "2026-04-17T21:33:21.167Z"
+completionSummary: Added per-agent notification channels in agent-state, a route-resolving agent-mail notify command, README command docs, and focused CLI tests.
 summary: Plan to address Notification Channel Integration
 steps:
