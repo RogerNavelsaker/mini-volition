@@ -1,5 +1,6 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { consolidateExtractedFacts, matchEntityToItem } from "./facts";
+import { consolidateExtractedFacts, matchEntityToItem, upsertMemoryFact } from "./facts";
 
 describe("matchEntityToItem", () => {
   const items = [
@@ -90,5 +91,51 @@ describe("consolidateExtractedFacts", () => {
 
     expect(facts).toHaveLength(2);
     expect(facts.map((entry) => entry.sourceItemId).sort((a, b) => a - b)).toEqual([10, 12]);
+  });
+});
+
+describe("upsertMemoryFact", () => {
+  test("merges descriptions across active facts with the same tuple", () => {
+    const db = new Database(":memory:");
+    db.exec(`CREATE TABLE agent_memory_facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_name TEXT NOT NULL,
+      source_item_id INTEGER NOT NULL,
+      subject TEXT NOT NULL,
+      predicate TEXT NOT NULL,
+      object TEXT NOT NULL,
+      evidence TEXT,
+      valid_from DATETIME DEFAULT CURRENT_TIMESTAMP,
+      valid_to DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(agent_name, source_item_id, subject, predicate, object)
+    );`);
+
+    upsertMemoryFact(db, "codex", 10, {
+      subject: "GitHub Actions",
+      predicate: "uses",
+      object: "bun standalone executables",
+      evidence: "GitHub Actions uses bun standalone executables for release artifacts",
+    });
+    upsertMemoryFact(db, "codex", 11, {
+      subject: "GitHub Actions",
+      predicate: "uses",
+      object: "bun standalone executables",
+      evidence: "Release artifacts are produced by GitHub Actions with bun standalone executables",
+    });
+
+    const rows = db.prepare(
+      `SELECT source_item_id, evidence
+       FROM agent_memory_facts
+       WHERE agent_name = 'codex'
+       ORDER BY source_item_id ASC`,
+    ).all() as Array<{ source_item_id: number; evidence: string }>;
+
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.evidence).toContain("GitHub Actions uses bun standalone executables for release artifacts");
+      expect(row.evidence).toContain("Release artifacts are produced by GitHub Actions with bun standalone executables");
+    }
   });
 });

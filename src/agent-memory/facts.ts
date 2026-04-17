@@ -94,6 +94,23 @@ function mergeEvidence(existing: string, next: string): string {
   return Array.from(parts).slice(0, 3).join(" | ");
 }
 
+function mergedFactEvidence(db: Database, agentName: string, fact: DerivedFact): string {
+  const rows = db.prepare(
+    `SELECT evidence
+     FROM agent_memory_facts
+     WHERE agent_name = ?
+       AND subject = ?
+       AND predicate = ?
+       AND object = ?
+       AND valid_to IS NULL`,
+  ).all(agentName, fact.subject, fact.predicate, fact.object) as Array<{ evidence: string | null }>;
+
+  return rows.reduce(
+    (merged, row) => mergeEvidence(merged, row.evidence ?? ""),
+    normalize(fact.evidence || `${fact.subject} ${fact.predicate} ${fact.object}`),
+  );
+}
+
 export function matchEntityToItem(items: MemoryItemRef[], entity: EntityTuple): MemoryItemRef | null {
   let best: MemoryItemRef | null = null;
   let bestScore = 0;
@@ -216,6 +233,7 @@ export function upsertMemoryFact(
   fact: DerivedFact,
   validFrom: string | null = null,
 ) {
+  const evidence = mergedFactEvidence(db, agentName, fact);
   db.run(
     `INSERT INTO agent_memory_facts
      (agent_name, source_item_id, subject, predicate, object, evidence, valid_from, valid_to, updated_at)
@@ -224,7 +242,17 @@ export function upsertMemoryFact(
        evidence = excluded.evidence,
        valid_to = NULL,
        updated_at = CURRENT_TIMESTAMP`,
-    [agentName, sourceItemId, fact.subject, fact.predicate, fact.object, fact.evidence, validFrom],
+    [agentName, sourceItemId, fact.subject, fact.predicate, fact.object, evidence, validFrom],
+  );
+  db.run(
+    `UPDATE agent_memory_facts
+     SET evidence = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE agent_name = ?
+       AND subject = ?
+       AND predicate = ?
+       AND object = ?
+       AND valid_to IS NULL`,
+    [evidence, agentName, fact.subject, fact.predicate, fact.object],
   );
 }
 
