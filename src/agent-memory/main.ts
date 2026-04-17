@@ -3,7 +3,7 @@ import { createConnection } from "net";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 import { relationForItemKinds, upsertMemoryLink, invalidateMemoryLinks, timelineQueryTokens } from "./links";
-import { deriveFacts, invalidateMemoryFacts, upsertMemoryFact } from "./facts";
+import { deriveFacts, invalidateMemoryFacts, matchEntityToItem, upsertMemoryFact } from "./facts";
 import { ensureSchema } from "./schema";
 import { appendMemoryArtifact, appendMemorySourceArtifact } from "../state-artifacts/lib";
 import type {
@@ -918,9 +918,12 @@ async function compact(agentName: string) {
       // For LLM-extracted entities, find best matching source item; for regex, use original evidence key
       let sourceItemId: number | undefined;
       if (extracted?.entities?.length) {
-        const bestMatch = createdItems.find((item) =>
-          item.content.includes(fact.subject) || item.content.includes(fact.object),
-        );
+        const bestMatch = matchEntityToItem(createdItems, {
+          subject: fact.subject,
+          predicate: fact.predicate,
+          object: fact.object,
+          description: fact.evidence,
+        });
         sourceItemId = bestMatch?.id;
       } else {
         const sourceKey = compacted.facts.includes(fact.evidence) ? `fact:${fact.evidence}` : `decision:${fact.evidence}`;
@@ -1006,9 +1009,7 @@ async function extractEntities(agentName: string) {
   }
   let stored = 0;
   for (const entity of result.entities) {
-    const bestMatch = unextracted.find((item) =>
-      item.content.includes(entity.subject) || item.content.includes(entity.object),
-    );
+    const bestMatch = matchEntityToItem(unextracted, entity);
     if (!bestMatch) continue;
     upsertMemoryFact(db, agentName, bestMatch.id, {
       subject: entity.subject,

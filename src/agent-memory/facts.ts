@@ -7,8 +7,76 @@ export type DerivedFact = {
   evidence: string;
 };
 
+export type EntityTuple = {
+  subject: string;
+  predicate: string;
+  object: string;
+  description?: string;
+};
+
+export type MemoryItemRef = {
+  id: number;
+  item_kind: string;
+  content: string;
+};
+
 function normalize(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+function normalizeForMatch(text: string): string {
+  return normalize(text)
+    .toLowerCase()
+    .replace(/[`"'()[\]{}:;,.!?/\\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeForMatch(text: string): string[] {
+  return normalizeForMatch(text).match(/[a-z0-9_]{3,}/g) ?? [];
+}
+
+function containsWholePhrase(content: string, phrase: string): boolean {
+  const normalizedContent = ` ${normalizeForMatch(content)} `;
+  const normalizedPhrase = normalizeForMatch(phrase);
+  if (!normalizedPhrase) return false;
+  return normalizedContent.includes(` ${normalizedPhrase} `);
+}
+
+function tokenOverlap(left: string, right: string): number {
+  const leftTokens = [...new Set(tokenizeForMatch(left))];
+  if (leftTokens.length === 0) return 0;
+  const rightSet = new Set(tokenizeForMatch(right));
+  let matches = 0;
+  for (const token of leftTokens) {
+    if (rightSet.has(token)) matches += 1;
+  }
+  return matches / leftTokens.length;
+}
+
+function matchScore(item: MemoryItemRef, entity: EntityTuple): number {
+  let score = 0;
+  if (containsWholePhrase(item.content, entity.subject)) score += 0.55;
+  if (containsWholePhrase(item.content, entity.object)) score += 0.55;
+  if (containsWholePhrase(item.content, entity.predicate)) score += 0.2;
+  score += tokenOverlap(`${entity.subject} ${entity.object}`, item.content) * 0.35;
+  score += tokenOverlap(entity.description ?? "", item.content) * 0.25;
+  if (item.item_kind === "fact") score += 0.08;
+  if (item.item_kind === "decision" && /decid|prefer|choose|use/i.test(entity.predicate)) score += 0.04;
+  return score;
+}
+
+export function matchEntityToItem(items: MemoryItemRef[], entity: EntityTuple): MemoryItemRef | null {
+  let best: MemoryItemRef | null = null;
+  let bestScore = 0;
+  for (const item of items) {
+    const score = matchScore(item, entity);
+    if (score > bestScore) {
+      best = item;
+      bestScore = score;
+    }
+  }
+  return bestScore >= 0.45 ? best : null;
 }
 
 export function deriveFacts(agentName: string, facts: string[], decisions: string[]): DerivedFact[] {
