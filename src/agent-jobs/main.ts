@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { addJobDependency, cascadeCancel, ensureJobSchema, jobDeps, manualUnblock, nextQueuedJob, normalizePriority, pendingBlockers, PRIORITIES, reclaimStaleClaims, unblockDependents } from "./core";
+import { addJobDependency, autoRetryOrFail, cascadeCancel, ensureJobSchema, executionGraph, jobDeps, manualUnblock, nextQueuedJob, normalizePriority, pendingBlockers, PRIORITIES, reclaimStaleClaims, unblockDependents } from "./core";
 import { appendJobArtifact } from "../state-artifacts/lib";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
@@ -31,7 +31,7 @@ const [, , cmd, arg1, arg2, arg3, arg4] = Bun.argv;
 const arg5 = Bun.argv[6];
 
 function usage(): never {
-  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|depend|cascade-cancel|unblock-job|deps|reclaim-stale|rebuild|verify|list|skill> ...");
+  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|depend|cascade-cancel|unblock-job|deps|graph|reclaim-stale|rebuild|verify|list|skill> ...");
   process.exit(64);
 }
 
@@ -91,8 +91,9 @@ function rebuildJobs(agent?: string) {
       const insert = db.prepare(
         `INSERT INTO fleet_internal_jobs (
            id, target_agent, sender, body, priority, available_at, status,
-           wait_reason, blocked_on, claimed_at, claimed_by, completed_at, cancelled_at, last_error, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           wait_reason, blocked_on, claimed_at, claimed_by, completed_at, cancelled_at, last_error,
+           max_retries, retry_count, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const job of [...latestById.values()].sort((a, b) => Number(a.id) - Number(b.id))) {
         insert.run(
@@ -110,6 +111,8 @@ function rebuildJobs(agent?: string) {
           job.completed_at ?? null,
           job.cancelled_at ?? null,
           job.last_error ?? null,
+          job.max_retries ?? 0,
+          job.retry_count ?? 0,
           job.created_at ?? job.updated_at ?? new Date().toISOString(),
           job.updated_at ?? job.created_at ?? new Date().toISOString(),
         );
@@ -193,16 +196,18 @@ function verifyJobs(agent?: string) {
 }
 ensureJobSchema(db);
 
+const arg6 = Bun.argv[7];
 if (cmd === "queue") {
   if (!arg1 || !arg2 || !arg3) {
-    console.error("Usage: agent-jobs queue <targetAgent> <sender> <body> [priority] [availableAt]");
+    console.error("Usage: agent-jobs queue <targetAgent> <sender> <body> [priority] [availableAt] [maxRetries]");
     process.exit(64);
   }
   const priority = normalizePriority(arg4);
+  const maxRetries = Math.max(0, parseInt(arg6 || "0", 10) || 0);
   db.run(
-    `INSERT INTO fleet_internal_jobs (target_agent, sender, body, priority, available_at, status, updated_at)
-     VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), 'queued', CURRENT_TIMESTAMP)`,
-    [arg1, arg2, arg3, priority, arg5 ?? null],
+    `INSERT INTO fleet_internal_jobs (target_agent, sender, body, priority, available_at, status, max_retries, updated_at)
+     VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), 'queued', ?, CURRENT_TIMESTAMP)`,
+    [arg1, arg2, arg3, priority, arg5 ?? null, maxRetries],
   );
   const queued = db.prepare("SELECT * FROM fleet_internal_jobs WHERE id = last_insert_rowid()").get() as any;
   appendJobArtifact(arg1, {
@@ -290,23 +295,24 @@ if (cmd === "queue") {
   }
   db.run(
     `UPDATE fleet_internal_jobs
-     SET status = 'failed',
-         wait_reason = NULL,
+     SET wait_reason = NULL,
          blocked_on = NULL,
          claimed_by = COALESCE(claimed_by, ?),
          cancelled_at = NULL,
-         last_error = ?,
          updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
-    [arg2, arg3 ?? null, Number(arg1)],
+    [arg2, Number(arg1)],
   );
-  const failed = db.prepare("SELECT * FROM fleet_internal_jobs WHERE id = ?").get(Number(arg1)) as any;
+  const retry = autoRetryOrFail(db, Number(arg1), arg3 ?? null);
+  const outcome = db.prepare("SELECT * FROM fleet_internal_jobs WHERE id = ?").get(Number(arg1)) as any;
   appendJobArtifact(arg2, {
     record_type: "job",
-    event: "failed",
-    job: failed,
+    event: retry.retried ? "retried" : "failed",
+    job: outcome,
+    retry_count: retry.retry_count,
+    max_retries: retry.max_retries,
   });
-  console.log(JSON.stringify(failed ?? null));
+  console.log(JSON.stringify({ ...outcome, retried: retry.retried, retry_count: retry.retry_count, max_retries: retry.max_retries }));
 } else if (cmd === "reschedule") {
   if (!arg1 || !arg2) {
     console.error("Usage: agent-jobs reschedule <jobId> <agent> [availableAt] [error]");
@@ -482,6 +488,8 @@ if (cmd === "queue") {
   }
   const deps = jobDeps(db, Number(arg1));
   console.log(JSON.stringify({ job_id: Number(arg1), ...deps }));
+} else if (cmd === "graph") {
+  console.log(JSON.stringify(executionGraph(db, arg1 ?? undefined)));
 } else if (cmd === "reclaim-stale") {
   if (!arg1) {
     console.error("Usage: agent-jobs reclaim-stale <agent> [ttlMs]");

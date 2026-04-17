@@ -22,6 +22,8 @@ export function ensureJobSchema(db: Database) {
     completed_at DATETIME,
     cancelled_at DATETIME,
     last_error TEXT,
+    max_retries INTEGER NOT NULL DEFAULT 0,
+    retry_count INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
@@ -151,6 +153,71 @@ export function jobDeps(db: Database, jobId: number): JobDeps {
   ).all(jobId) as Array<{ id: number; status: string }>;
 
   return { blockedBy, blocking };
+}
+
+export interface ExecutionGraph {
+  nodes: Array<{ id: number; target_agent: string; status: string; priority: string; retry_count: number; max_retries: number }>;
+  edges: Array<{ from: number; to: number }>;
+}
+
+export function executionGraph(db: Database, agent?: string): ExecutionGraph {
+  const nodes = (agent
+    ? db.prepare(
+        `SELECT id, target_agent, status, priority, retry_count, max_retries
+         FROM fleet_internal_jobs WHERE target_agent = ? ORDER BY id ASC`,
+      ).all(agent)
+    : db.prepare(
+        `SELECT id, target_agent, status, priority, retry_count, max_retries
+         FROM fleet_internal_jobs ORDER BY id ASC`,
+      ).all()) as ExecutionGraph["nodes"];
+
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const allEdges = db.prepare(
+    `SELECT dependent_job_id as "to", blocking_job_id as "from"
+     FROM fleet_job_dependencies ORDER BY blocking_job_id ASC, dependent_job_id ASC`,
+  ).all() as Array<{ from: number; to: number }>;
+
+  const edges = allEdges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
+  return { nodes, edges };
+}
+
+export function autoRetryOrFail(
+  db: Database,
+  jobId: number,
+  error: string | null,
+): { retried: boolean; retry_count: number; max_retries: number } {
+  const job = db.prepare(
+    `SELECT retry_count, max_retries FROM fleet_internal_jobs WHERE id = ?`,
+  ).get(jobId) as { retry_count: number; max_retries: number } | undefined;
+
+  if (!job) return { retried: false, retry_count: 0, max_retries: 0 };
+
+  if (job.retry_count < job.max_retries) {
+    db.run(
+      `UPDATE fleet_internal_jobs
+       SET status = 'queued',
+           retry_count = retry_count + 1,
+           claimed_at = NULL,
+           claimed_by = NULL,
+           completed_at = NULL,
+           cancelled_at = NULL,
+           last_error = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [error, jobId],
+    );
+    return { retried: true, retry_count: job.retry_count + 1, max_retries: job.max_retries };
+  }
+
+  db.run(
+    `UPDATE fleet_internal_jobs
+     SET status = 'failed',
+         last_error = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [error, jobId],
+  );
+  return { retried: false, retry_count: job.retry_count, max_retries: job.max_retries };
 }
 
 export function normalizePriority(value: string | undefined | null): JobPriority {
