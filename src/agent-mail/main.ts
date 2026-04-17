@@ -1,11 +1,25 @@
 import { Database } from "bun:sqlite";
 import { buildBurstFromPrimary, claimBurst, completeBurst, countUnread, ensureMailSchema, peekBurst, reclaimStaleClaims, releaseClaims, type BurstEnvelope, type FleetMessage, unreadQueryFor } from "./core";
 import { appendMailArtifact } from "../state-artifacts/lib";
+import { getSubscriptions } from "../agent-state/schema";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 
 const dbPath = process.env.AGENT_MAIL_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-mail.db");
+const stateDbPath = process.env.AGENT_STATE_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-state.db");
 const db = new Database(dbPath);
+let stateDb: Database | null = null;
+try {
+  if (existsSync(stateDbPath)) stateDb = new Database(stateDbPath, { readonly: true, create: false });
+} catch { /* state db unavailable — subscriptions disabled */ }
+
+function loadSubscriptions(agentName: string): string[] | undefined {
+  if (!stateDb) return undefined;
+  try {
+    const layers = getSubscriptions(stateDb, agentName);
+    return layers.length > 0 ? layers : undefined;
+  } catch { return undefined; }
+}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -275,8 +289,9 @@ if (cmd === "send") {
     message,
   });
 } else if (cmd === "listen") {
+  const subs = loadSubscriptions(sender);
   while (true) {
-    const burst = await withBusyRetry(() => claimBurst(db, sender, 1, 0));
+    const burst = await withBusyRetry(() => claimBurst(db, sender, 1, 0, undefined, subs));
     if (burst) {
       console.log(JSON.stringify(burst.primary));
       process.exit(0);
@@ -287,9 +302,10 @@ if (cmd === "send") {
 } else if (cmd === "listen-burst") {
   const maxMessages = Math.max(1, parseInt(arg1 || "6", 10) || 6);
   const windowSec = Math.max(0, parseInt(arg2 || "300", 10) || 300);
+  const subs = loadSubscriptions(sender);
 
   while (true) {
-    const burst = await withBusyRetry(() => claimBurst(db, sender, maxMessages, windowSec));
+    const burst = await withBusyRetry(() => claimBurst(db, sender, maxMessages, windowSec, undefined, subs));
     if (burst) {
       console.log(JSON.stringify(burst));
       process.exit(0);
@@ -300,13 +316,13 @@ if (cmd === "send") {
 } else if (cmd === "peek-burst") {
   const maxMessages = Math.max(1, parseInt(arg1 || "6", 10) || 6);
   const windowSec = Math.max(0, parseInt(arg2 || "300", 10) || 300);
-  const burst = await withBusyRetry(() => peekBurst(db, sender, maxMessages, windowSec));
+  const burst = await withBusyRetry(() => peekBurst(db, sender, maxMessages, windowSec, loadSubscriptions(sender)));
   console.log(JSON.stringify(burst));
 } else if (cmd === "claim-burst") {
   const maxMessages = Math.max(1, parseInt(arg1 || "6", 10) || 6);
   const windowSec = Math.max(0, parseInt(arg2 || "300", 10) || 300);
   const primaryId = arg3 ? Math.max(1, parseInt(arg3, 10) || 0) : undefined;
-  const burst = await withBusyRetry(() => claimBurst(db, sender, maxMessages, windowSec, primaryId));
+  const burst = await withBusyRetry(() => claimBurst(db, sender, maxMessages, windowSec, primaryId, loadSubscriptions(sender)));
   if (burst) {
     appendMailArtifact(sender, {
       record_type: "claim",

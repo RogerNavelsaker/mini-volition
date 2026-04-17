@@ -3,7 +3,7 @@ import { execFileSync } from "child_process";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 import { appendActionArtifact, appendReviewArtifact, appendRuntimeArtifact, appendTurnArtifact } from "../state-artifacts/lib";
-import { ensureSchema } from "./schema";
+import { ensureSchema, getSubscriptions } from "./schema";
 import { detectGhosts, markGhost, recordGhostTransition } from "./ghost";
 
 const dbPath = process.env.AGENT_STATE_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-state.db");
@@ -847,6 +847,32 @@ if (cmd === "get") {
     }
   }
   console.log(JSON.stringify({ ghosts_detected: ghosts.length, ghosts_marked: marked.length, marked }));
+} else if (cmd === "subscribe") {
+  if (!arg1 || !arg2) {
+    console.error("Usage: agent-state subscribe <agent-name> <layer>");
+    process.exit(64);
+  }
+  db.prepare(
+    `INSERT INTO agent_channel_subscriptions (agent_name, layer) VALUES (?, ?)
+     ON CONFLICT(agent_name, layer) DO NOTHING`,
+  ).run(arg1, arg2);
+  console.log(JSON.stringify({ agent_name: arg1, layer: arg2, subscribed: true }));
+} else if (cmd === "unsubscribe") {
+  if (!arg1 || !arg2) {
+    console.error("Usage: agent-state unsubscribe <agent-name> <layer>");
+    process.exit(64);
+  }
+  const result = db.prepare(
+    `DELETE FROM agent_channel_subscriptions WHERE agent_name = ? AND layer = ?`,
+  ).run(arg1, arg2);
+  console.log(JSON.stringify({ agent_name: arg1, layer: arg2, removed: result.changes > 0 }));
+} else if (cmd === "list-subscriptions") {
+  if (!arg1) {
+    console.error("Usage: agent-state list-subscriptions <agent-name>");
+    process.exit(64);
+  }
+  const layers = getSubscriptions(db, arg1);
+  console.log(JSON.stringify({ agent_name: arg1, layers }));
 } else {
   usage();
 }

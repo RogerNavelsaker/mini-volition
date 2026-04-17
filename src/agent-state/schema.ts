@@ -57,4 +57,18 @@ export function ensureSchema(db: Database) {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(agent_name, turn_key)
   );`);
+  db.run(`CREATE TABLE IF NOT EXISTS agent_channel_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_name TEXT NOT NULL,
+    layer TEXT NOT NULL,
+    subscribed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(agent_name, layer)
+  );`);
+}
+
+export function getSubscriptions(db: Database, agentName: string): string[] {
+  const rows = db.prepare(
+    `SELECT layer FROM agent_channel_subscriptions WHERE agent_name = ? ORDER BY layer ASC`,
+  ).all(agentName) as Array<{ layer: string }>;
+  return rows.map((r) => r.layer);
 }
