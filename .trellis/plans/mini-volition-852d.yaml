@@ -2,8 +2,10 @@ id: mini-volition-852d
 title: Source Group Classification
 seed: mini-volition-852d
 spec: mini-volition-852d
-status: active
+status: done
 createdAt: "2026-04-15T20:40:54.131Z"
-updatedAt: "2026-04-15T20:40:54.131Z"
+updatedAt: "2026-04-17T17:04:54.044Z"
+completedAt: "2026-04-17T17:04:54.042Z"
+completionSummary: Added source-group classification for wakes, propagated it through wake selection, fed governor reasons with source groups, added tests, and validated with a full build.
 summary: Plan to address Source Group Classification
 steps:
