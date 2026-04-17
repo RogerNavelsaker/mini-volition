@@ -65,9 +65,32 @@ export function unreadQueryFor(db: Database, agent: string) {
   );
 }
 
-export function countUnread(db: Database, agent: string): number {
-  const rec = unreadQueryFor(db, agent).all(agent, agent, `%|${agent}|%`) as FleetMessage[];
-  return rec.length;
+export function getUnread(db: Database, agent: string, subscribedLayers?: string[]): FleetMessage[] {
+  const hasFilter = subscribedLayers && subscribedLayers.length > 0;
+  const layerClause = hasFilter
+    ? `AND fleet_comms.layer IN (SELECT value FROM json_each(?))`
+    : "";
+  const stmt = db.prepare(
+    `SELECT fleet_comms.*
+     FROM fleet_comms
+     ${claimJoin(agent)}
+     WHERE fleet_comms.sender != ?
+       AND claim.id IS NULL
+       AND (
+         (LOWER(fleet_comms.recipient) = LOWER(?) AND fleet_comms.read_at IS NULL)
+         OR
+         (LOWER(fleet_comms.recipient) = 'all' AND IFNULL(fleet_comms.read_by, '') NOT LIKE ?
+          ${layerClause})
+       )
+     ORDER BY fleet_comms.id ASC`,
+  );
+  const params: unknown[] = [agent, agent, `%|${agent}|%`];
+  if (hasFilter) params.push(JSON.stringify(subscribedLayers));
+  return stmt.all(...params) as FleetMessage[];
+}
+
+export function countUnread(db: Database, agent: string, subscribedLayers?: string[]): number {
+  return getUnread(db, agent, subscribedLayers).length;
 }
 
 export function buildBurstFromPrimary(agent: string, primary: FleetMessage, unread: FleetMessage[], maxMessages: number, windowSec: number): BurstEnvelope {
@@ -92,15 +115,15 @@ export function buildBurstFromPrimary(agent: string, primary: FleetMessage, unre
   };
 }
 
-export function peekBurst(db: Database, agent: string, maxMessages: number, windowSec: number): BurstEnvelope | null {
-  const unread = unreadQueryFor(db, agent).all(agent, agent, `%|${agent}|%`) as FleetMessage[];
+export function peekBurst(db: Database, agent: string, maxMessages: number, windowSec: number, subscribedLayers?: string[]): BurstEnvelope | null {
+  const unread = getUnread(db, agent, subscribedLayers);
   if (unread.length === 0) return null;
   const primary = unread[0];
   return buildBurstFromPrimary(agent, primary, unread, maxMessages, windowSec);
 }
 
-export function claimBurst(db: Database, agent: string, maxMessages: number, windowSec: number, primaryId?: number): BurstEnvelope | null {
-  const unread = unreadQueryFor(db, agent).all(agent, agent, `%|${agent}|%`) as FleetMessage[];
+export function claimBurst(db: Database, agent: string, maxMessages: number, windowSec: number, primaryId?: number, subscribedLayers?: string[]): BurstEnvelope | null {
+  const unread = getUnread(db, agent, subscribedLayers);
   if (unread.length === 0) return null;
   const primary = primaryId ? unread.find((msg) => msg.id === primaryId) : unread[0];
   if (!primary) return null;
@@ -116,7 +139,7 @@ export function claimBurst(db: Database, agent: string, maxMessages: number, win
       [msg.id, agent],
     );
   }
-  return { ...burst, remainingUnread: Math.max(0, countUnread(db, agent)) };
+  return { ...burst, remainingUnread: Math.max(0, countUnread(db, agent, subscribedLayers)) };
 }
 
 export function completeBurst(db: Database, agent: string, messageIds: number[]) {
