@@ -25,6 +25,58 @@ export function ensureJobSchema(db: Database) {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
+  db.run(`CREATE TABLE IF NOT EXISTS fleet_job_dependencies (
+    dependent_job_id INTEGER NOT NULL REFERENCES fleet_internal_jobs(id),
+    blocking_job_id  INTEGER NOT NULL REFERENCES fleet_internal_jobs(id),
+    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (dependent_job_id, blocking_job_id)
+  );`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_job_deps_blocking
+    ON fleet_job_dependencies (blocking_job_id);`);
+}
+
+export function addJobDependency(db: Database, dependentJobId: number, blockingJobId: number) {
+  db.run(
+    `INSERT OR IGNORE INTO fleet_job_dependencies (dependent_job_id, blocking_job_id)
+     VALUES (?, ?)`,
+    [dependentJobId, blockingJobId],
+  );
+}
+
+export function pendingBlockers(db: Database, dependentJobId: number): number {
+  const row = db.prepare(
+    `SELECT COUNT(*) as cnt
+     FROM fleet_job_dependencies d
+     JOIN fleet_internal_jobs j ON j.id = d.blocking_job_id
+     WHERE d.dependent_job_id = ?
+       AND j.status NOT IN ('completed', 'cancelled')`,
+  ).get(dependentJobId) as { cnt: number };
+  return row?.cnt ?? 0;
+}
+
+export function unblockDependents(db: Database, completedJobId: number): number[] {
+  const candidates = db.prepare(
+    `SELECT d.dependent_job_id
+     FROM fleet_job_dependencies d
+     WHERE d.blocking_job_id = ?`,
+  ).all(completedJobId) as Array<{ dependent_job_id: number }>;
+
+  const unblocked: number[] = [];
+  for (const { dependent_job_id } of candidates) {
+    if (pendingBlockers(db, dependent_job_id) === 0) {
+      const result = db.run(
+        `UPDATE fleet_internal_jobs
+         SET status = 'queued',
+             blocked_on = NULL,
+             wait_reason = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND status IN ('blocked', 'waiting')`,
+        [dependent_job_id],
+      );
+      if (result.changes > 0) unblocked.push(dependent_job_id);
+    }
+  }
+  return unblocked;
 }
 
 export function normalizePriority(value: string | undefined | null): JobPriority {

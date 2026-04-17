@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { ensureJobSchema, nextQueuedJob, normalizePriority, PRIORITIES, reclaimStaleClaims } from "./core";
+import { addJobDependency, ensureJobSchema, nextQueuedJob, normalizePriority, pendingBlockers, PRIORITIES, reclaimStaleClaims, unblockDependents } from "./core";
 import { appendJobArtifact } from "../state-artifacts/lib";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
@@ -31,7 +31,7 @@ const [, , cmd, arg1, arg2, arg3, arg4] = Bun.argv;
 const arg5 = Bun.argv[6];
 
 function usage(): never {
-  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|reclaim-stale|rebuild|verify|list|skill> ...");
+  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|depend|reclaim-stale|rebuild|verify|list|skill> ...");
   process.exit(64);
 }
 
@@ -60,7 +60,9 @@ function rebuildJobs(agent?: string) {
   const rebuilt: Array<Record<string, unknown>> = [];
   db.exec("BEGIN IMMEDIATE;");
   try {
+    const allDeps: Array<{ dependent_job_id: number; blocking_job_id: number }> = [];
     for (const name of agents) {
+      db.prepare("DELETE FROM fleet_job_dependencies WHERE dependent_job_id IN (SELECT id FROM fleet_internal_jobs WHERE target_agent = ?)").run(name);
       db.prepare("DELETE FROM fleet_internal_jobs WHERE target_agent = ?").run(name);
       const rows = readJsonl(stateDir("jobs", `${name}.jsonl`));
       const latestById = new Map<number, any>();
@@ -82,6 +84,8 @@ function rebuildJobs(agent?: string) {
               updated_at: row.recorded_at ?? current.updated_at,
             });
           }
+        } else if (row.record_type === "job_dependency" && row.dependent_job_id != null && row.blocking_job_id != null) {
+          allDeps.push({ dependent_job_id: Number(row.dependent_job_id), blocking_job_id: Number(row.blocking_job_id) });
         }
       }
       const insert = db.prepare(
@@ -111,6 +115,12 @@ function rebuildJobs(agent?: string) {
         );
       }
       rebuilt.push({ agent: name, records: rows.length, jobs: latestById.size });
+    }
+    const insertDep = db.prepare(
+      `INSERT OR IGNORE INTO fleet_job_dependencies (dependent_job_id, blocking_job_id) VALUES (?, ?)`,
+    );
+    for (const dep of allDeps) {
+      try { insertDep.run(dep.dependent_job_id, dep.blocking_job_id); } catch { /* missing job — skip */ }
     }
     db.exec("COMMIT;");
   } catch (error) {
@@ -265,12 +275,14 @@ if (cmd === "queue") {
     [arg2, Number(arg1)],
   );
   const completed = db.prepare("SELECT * FROM fleet_internal_jobs WHERE id = ?").get(Number(arg1)) as any;
+  const unblocked = unblockDependents(db, Number(arg1));
   appendJobArtifact(arg2, {
     record_type: "job",
     event: "completed",
     job: completed,
+    unblocked_job_ids: unblocked,
   });
-  console.log(JSON.stringify(completed ?? null));
+  console.log(JSON.stringify({ ...completed, unblocked_job_ids: unblocked } ?? null));
 } else if (cmd === "fail") {
   if (!arg1 || !arg2) {
     console.error("Usage: agent-jobs fail <jobId> <agent> [error]");
@@ -385,8 +397,9 @@ if (cmd === "queue") {
     [arg2, arg3 ?? "cancelled", Number(arg1)],
   );
   const cancelled = db.prepare("SELECT * FROM fleet_internal_jobs WHERE id = ?").get(Number(arg1)) as any;
-  appendJobArtifact(arg2, { record_type: "job", event: "cancelled", job: cancelled });
-  console.log(JSON.stringify(cancelled ?? null));
+  const unblockedOnCancel = unblockDependents(db, Number(arg1));
+  appendJobArtifact(arg2, { record_type: "job", event: "cancelled", job: cancelled, unblocked_job_ids: unblockedOnCancel });
+  console.log(JSON.stringify({ ...cancelled, unblocked_job_ids: unblockedOnCancel } ?? null));
 } else if (cmd === "resume") {
   if (!arg1 || !arg2) {
     console.error("Usage: agent-jobs resume <jobId> <agent> [availableAt]");
@@ -409,6 +422,36 @@ if (cmd === "queue") {
   const resumed = db.prepare("SELECT * FROM fleet_internal_jobs WHERE id = ?").get(Number(arg1)) as any;
   appendJobArtifact(arg2, { record_type: "job", event: "resumed", job: resumed });
   console.log(JSON.stringify(resumed ?? null));
+} else if (cmd === "depend") {
+  if (!arg1 || !arg2 || !arg3) {
+    console.error("Usage: agent-jobs depend <dependentJobId> <blockingJobId> <agent>");
+    process.exit(64);
+  }
+  const depJobId = Number(arg1);
+  const blockJobId = Number(arg2);
+  addJobDependency(db, depJobId, blockJobId);
+  db.run(
+    `UPDATE fleet_internal_jobs
+     SET status = 'blocked',
+         blocked_on = ?,
+         wait_reason = NULL,
+         claimed_at = NULL,
+         claimed_by = NULL,
+         completed_at = NULL,
+         cancelled_at = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status NOT IN ('completed', 'cancelled', 'failed')`,
+    [String(blockJobId), depJobId],
+  );
+  const dep = db.prepare("SELECT * FROM fleet_internal_jobs WHERE id = ?").get(depJobId) as any;
+  appendJobArtifact(arg3, {
+    record_type: "job_dependency",
+    event: "depend",
+    dependent_job_id: depJobId,
+    blocking_job_id: blockJobId,
+    job: dep,
+  });
+  console.log(JSON.stringify({ dependent_job_id: depJobId, blocking_job_id: blockJobId, job: dep }));
 } else if (cmd === "reclaim-stale") {
   if (!arg1) {
     console.error("Usage: agent-jobs reclaim-stale <agent> [ttlMs]");
