@@ -2,8 +2,10 @@ id: mini-volition-8866
 title: Verbatim Fragment Schema & Ingest
 seed: mini-volition-8866
 spec: mini-volition-8866
-status: active
+status: done
 createdAt: "2026-04-15T20:40:55.554Z"
-updatedAt: "2026-04-15T20:40:55.554Z"
+updatedAt: "2026-04-17T21:48:56.531Z"
+completedAt: "2026-04-17T21:48:56.529Z"
+completionSummary: Recovered the blocked verbatim-fragment handoff by adding tier0_verbatim schema, wiring the push-verbatim CLI ingest path, fixing schema initialization in agent-memory, and validating with CLI-level tests and build.
 summary: Plan to address Verbatim Fragment Schema & Ingest
 steps:
