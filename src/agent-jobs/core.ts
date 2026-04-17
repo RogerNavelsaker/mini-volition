@@ -79,6 +79,80 @@ export function unblockDependents(db: Database, completedJobId: number): number[
   return unblocked;
 }
 
+export function cascadeCancel(
+  db: Database,
+  jobId: number,
+  reason: string,
+  visited = new Set<number>(),
+): number[] {
+  if (visited.has(jobId)) return [];
+  visited.add(jobId);
+
+  const result = db.run(
+    `UPDATE fleet_internal_jobs
+     SET status = 'cancelled',
+         wait_reason = NULL,
+         blocked_on = NULL,
+         claimed_at = NULL,
+         cancelled_at = CURRENT_TIMESTAMP,
+         last_error = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status NOT IN ('completed', 'cancelled')`,
+    [reason, jobId],
+  );
+
+  const cancelled = result.changes > 0 ? [jobId] : [];
+  const dependents = db.prepare(
+    `SELECT d.dependent_job_id
+     FROM fleet_job_dependencies d
+     JOIN fleet_internal_jobs j ON j.id = d.dependent_job_id
+     WHERE d.blocking_job_id = ? AND j.status NOT IN ('completed', 'cancelled')`,
+  ).all(jobId) as Array<{ dependent_job_id: number }>;
+
+  for (const { dependent_job_id } of dependents) {
+    cancelled.push(...cascadeCancel(db, dependent_job_id, `cascade from ${jobId}: ${reason}`, visited));
+  }
+  return cancelled;
+}
+
+export function manualUnblock(db: Database, jobId: number): boolean {
+  const result = db.run(
+    `UPDATE fleet_internal_jobs
+     SET status = 'queued',
+         blocked_on = NULL,
+         wait_reason = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status IN ('blocked', 'waiting')`,
+    [jobId],
+  );
+  return result.changes > 0;
+}
+
+export interface JobDeps {
+  blockedBy: Array<{ id: number; status: string }>;
+  blocking: Array<{ id: number; status: string }>;
+}
+
+export function jobDeps(db: Database, jobId: number): JobDeps {
+  const blockedBy = db.prepare(
+    `SELECT j.id, j.status
+     FROM fleet_job_dependencies d
+     JOIN fleet_internal_jobs j ON j.id = d.blocking_job_id
+     WHERE d.dependent_job_id = ?
+     ORDER BY j.id ASC`,
+  ).all(jobId) as Array<{ id: number; status: string }>;
+
+  const blocking = db.prepare(
+    `SELECT j.id, j.status
+     FROM fleet_job_dependencies d
+     JOIN fleet_internal_jobs j ON j.id = d.dependent_job_id
+     WHERE d.blocking_job_id = ?
+     ORDER BY j.id ASC`,
+  ).all(jobId) as Array<{ id: number; status: string }>;
+
+  return { blockedBy, blocking };
+}
+
 export function normalizePriority(value: string | undefined | null): JobPriority {
   return PRIORITIES.includes((value ?? "") as JobPriority) ? (value as JobPriority) : "normal";
 }
