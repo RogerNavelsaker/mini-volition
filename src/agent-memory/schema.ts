@@ -142,4 +142,12 @@ export function ensureSchema(db: Database) {
     agent_name UNINDEXED,
     tokenize = 'porter unicode61'
   );`);
+  db.run(`CREATE TABLE IF NOT EXISTS agent_memory_prefetch_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_name TEXT NOT NULL,
+    query_hash TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(agent_name, query_hash)
+  );`);
 }
