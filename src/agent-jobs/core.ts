@@ -25,6 +25,19 @@ export function ensureJobSchema(db: Database) {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
+  db.run(`CREATE TABLE IF NOT EXISTS fleet_job_alarms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_agent TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    message TEXT NOT NULL,
+    due_at DATETIME NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    source_job_id INTEGER,
+    fired_at DATETIME,
+    cancelled_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
 }
 
 export function normalizePriority(value: string | undefined | null): JobPriority {

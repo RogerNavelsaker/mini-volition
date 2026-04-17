@@ -31,7 +31,7 @@ const [, , cmd, arg1, arg2, arg3, arg4] = Bun.argv;
 const arg5 = Bun.argv[6];
 
 function usage(): never {
-  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|reclaim-stale|rebuild|verify|list|skill> ...");
+  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|alarm-set|alarm-list|alarm-cancel|reclaim-stale|rebuild|verify|list|skill> ...");
   process.exit(64);
 }
 
@@ -409,6 +409,52 @@ if (cmd === "queue") {
   const resumed = db.prepare("SELECT * FROM fleet_internal_jobs WHERE id = ?").get(Number(arg1)) as any;
   appendJobArtifact(arg2, { record_type: "job", event: "resumed", job: resumed });
   console.log(JSON.stringify(resumed ?? null));
+} else if (cmd === "alarm-set") {
+  if (!arg1 || !arg2 || !arg3 || !arg4) {
+    console.error("Usage: agent-jobs alarm-set <targetAgent> <alarm|reminder> <message> <dueAt> [sourceJobId]");
+    process.exit(64);
+  }
+  const kind = arg2 === "alarm" ? "alarm" : arg2 === "reminder" ? "reminder" : null;
+  if (!kind) {
+    console.error("alarm kind must be alarm or reminder");
+    process.exit(64);
+  }
+  const dueAt = new Date(arg4.endsWith("Z") ? arg4 : `${arg4}Z`);
+  if (Number.isNaN(dueAt.getTime())) {
+    console.error("dueAt must be an ISO-8601 datetime");
+    process.exit(64);
+  }
+  db.run(
+    `INSERT INTO fleet_job_alarms (target_agent, kind, message, due_at, source_job_id, status, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)`,
+    [arg1, kind, arg3, dueAt.toISOString(), arg5 ? Number(arg5) : null],
+  );
+  const alarm = db.prepare("SELECT * FROM fleet_job_alarms WHERE id = last_insert_rowid()").get() as any;
+  appendJobArtifact(arg1, { record_type: "alarm", event: "scheduled", alarm });
+  console.log(JSON.stringify(alarm ?? null));
+} else if (cmd === "alarm-list") {
+  const limit = Math.max(1, parseInt(arg2 || "20", 10) || 20);
+  if (arg1) {
+    console.log(JSON.stringify(db.prepare("SELECT * FROM fleet_job_alarms WHERE target_agent = ? ORDER BY datetime(due_at) ASC, id ASC LIMIT ?").all(arg1, limit)));
+  } else {
+    console.log(JSON.stringify(db.prepare("SELECT * FROM fleet_job_alarms ORDER BY datetime(due_at) ASC, id ASC LIMIT ?").all(limit)));
+  }
+} else if (cmd === "alarm-cancel") {
+  if (!arg1 || !arg2) {
+    console.error("Usage: agent-jobs alarm-cancel <alarmId> <agent>");
+    process.exit(64);
+  }
+  db.run(
+    `UPDATE fleet_job_alarms
+     SET status = 'cancelled',
+         cancelled_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [Number(arg1)],
+  );
+  const alarm = db.prepare("SELECT * FROM fleet_job_alarms WHERE id = ?").get(Number(arg1)) as any;
+  appendJobArtifact(arg2, { record_type: "alarm", event: "cancelled", alarm });
+  console.log(JSON.stringify(alarm ?? null));
 } else if (cmd === "reclaim-stale") {
   if (!arg1) {
     console.error("Usage: agent-jobs reclaim-stale <agent> [ttlMs]");

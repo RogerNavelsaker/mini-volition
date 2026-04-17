@@ -78,6 +78,9 @@ agent-state rebuild [agent]        # rebuild from state/ JSONL
 agent-state subscription-list <agent>
 agent-state subscription-get <agent> <channel>
 agent-state subscription-set <agent> <channel> <subscribed|unsubscribed> [resumeAt] [note]
+agent-jobs alarm-set <agent> <alarm|reminder> <message> <dueAt> [sourceJobId]
+agent-jobs alarm-list [agent] [limit]
+agent-jobs alarm-cancel <alarmId> <agent>
 agent-jobs verify [agent]          # check job projection drift
 agent-mail verify                  # check transport projection drift
 agent-memory verify [agent]        # check memory projection drift
