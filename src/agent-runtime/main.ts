@@ -7,7 +7,8 @@ import { createConnection } from "net";
 import { join, dirname } from "path";
 import { ensureSchema as ensureMemorySchema } from "../agent-memory/schema";
 import { appendMemorySourceArtifact } from "../state-artifacts/lib";
-import { chooseRetrievalMode, chooseTurnProfile, classifySourceGroup, randomizedCooldownMs, refractoryCooldownMs, retryConfig, turnProfileConfig, wakeClassFor as schedulerWakeClassFor, type RetrievalMode, type TurnProfile, type WakeClass, type WakeSource, type WakeSourceGroup } from "./policy";
+import { buildProviderTargets, executeProviderTargets, type ProviderTurnTarget } from "./failover";
+import { chooseRetrievalMode, chooseTurnProfile, classifySourceGroup, randomizedCooldownMs, refractoryCooldownMs, turnProfileConfig, wakeClassFor as schedulerWakeClassFor, type RetrievalMode, type TurnProfile, type WakeClass, type WakeSource, type WakeSourceGroup } from "./policy";
 import { ensureTurnJournal, recoverInterruptedTurns, replayPolicyForAction, type TurnCheckpoint, type TurnPhase } from "./recovery";
 
 const name = process.env.AGENT_NAME;
@@ -27,6 +28,10 @@ const memoryBin = process.env.AGENT_MEMORY_BIN || "agent-memory";
 const embedSocket = process.env.INFERENCE_LOCAL_EMBED_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/embed.sock");
 const lightSocket = process.env.INFERENCE_LOCAL_SMALL_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/light.sock");
 const heavySocket = process.env.INFERENCE_LOCAL_MEDIUM_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/heavy.sock");
+const anthropicSocket = process.env.INFERENCE_CLOUD_ANTHROPIC_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/claude.sock");
+const googleSocket = process.env.INFERENCE_CLOUD_GOOGLE_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/gemini.sock");
+const openaiSocket = process.env.INFERENCE_CLOUD_OPENAI_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/openai.sock");
+const openrouterSocket = process.env.INFERENCE_CLOUD_OPENROUTER_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/openrouter.sock");
 const memoryDb = new Database(memoryDbPath);
 const stateDb = new Database(stateDbPath);
 const librarianDb = new Database(librarianDbPath);
@@ -1330,24 +1335,51 @@ function requestProviderTurn(
   });
 }
 
-async function withProviderRetry(
+async function requestProviderTurnWithFailover(
   profile: TurnProfile,
-  fn: () => Promise<ProviderTurnResponse>,
+  primarySocket: string,
+  primaryModel: string,
+  system: string,
+  promptText: string,
+  maxTokens: number,
+  temperature: number,
+  timeoutMs: number,
 ): Promise<ProviderTurnResponse> {
-  const cfg = retryConfig(profile);
-  let lastResponse: ProviderTurnResponse | null = null;
-  let backoff = cfg.backoffMs;
-  for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
-    const response = await fn();
-    if (response.stop_reason !== "error" && response.stop_reason !== "rate_limited") return response;
-    lastResponse = response;
-    if (attempt < cfg.maxAttempts) {
-      recordWorking("system", `Provider retry ${attempt}/${cfg.maxAttempts} profile=${profile} reason=${response.error ?? response.stop_reason} backoff=${backoff}ms`);
-      await new Promise((resolve) => setTimeout(resolve, backoff));
-      backoff = Math.round(backoff * cfg.backoffMultiplier);
-    }
-  }
-  return lastResponse!;
+  const targets = buildProviderTargets(
+    primarySocket,
+    primaryModel,
+    profile,
+    {
+      anthropic: anthropicSocket,
+      google: googleSocket,
+      openai: openaiSocket,
+      openrouter: openrouterSocket,
+    },
+    process.env,
+  );
+
+  return executeProviderTargets(
+    profile,
+    targets,
+    (target: ProviderTurnTarget) => requestProviderTurn(
+      target.socketPath,
+      target.model,
+      system,
+      promptText,
+      maxTokens,
+      temperature,
+      timeoutMs,
+    ),
+    {
+      onFallback: (target, attempt, reason, backoffMs) => {
+        const mode = targets.length > 1 ? "failover" : "retry";
+        recordWorking(
+          "system",
+          `Provider ${mode} ${attempt}/${targets.length} profile=${profile} provider=${target.provider} model=${target.model} reason=${reason} backoff=${backoffMs}ms`,
+        );
+      },
+    },
+  );
 }
 
 async function chooseTurnExecutionProfile(source: WakeSource, burst: IncomingBurst): Promise<TurnExecutionProfile> {
@@ -2210,17 +2242,15 @@ async function processWakeEvent(
       if (!turnModel) {
       diagnosticBuffer += "No model specified (INFERENCE_CLOUD_MODEL or execution profile model required)\n";
       }
-      const turnResponse = await withProviderRetry(
+      const turnResponse = await requestProviderTurnWithFailover(
         executionProfile.profile,
-        () => requestProviderTurn(
-          providerSocket,
-          turnModel,
-          renderSystemPrompt(name, burst),
-          promptText,
-          parseInt(process.env.FLEET_OUTPUT_BUDGET || "8192", 10),
-          executionProfile.profile === "light" ? 0.3 : 1.0,
-          executionProfile.timeout_ms,
-        ),
+        providerSocket,
+        turnModel,
+        renderSystemPrompt(name, burst),
+        promptText,
+        parseInt(process.env.FLEET_OUTPUT_BUDGET || "8192", 10),
+        executionProfile.profile === "light" ? 0.3 : 1.0,
+        executionProfile.timeout_ms,
       );
       responseText = turnResponse.content;
       if (turnResponse.error) {

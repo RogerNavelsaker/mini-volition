@@ -115,6 +115,15 @@ Key env vars (all have defaults):
 | `AGENT_NAME` | Agent identity |
 | `INFERENCE_CLOUD_SOCKET` | Cloud provider Unix socket path |
 | `INFERENCE_CLOUD_MODEL` | Cloud model ID |
+| `INFERENCE_CLOUD_FAILOVER_ORDER` | Comma-separated provider fallback order (`openrouter,openai,anthropic,google`) |
+| `INFERENCE_CLOUD_ANTHROPIC_SOCKET` | Anthropic provider socket for failover |
+| `INFERENCE_CLOUD_GOOGLE_SOCKET` | Google provider socket for failover |
+| `INFERENCE_CLOUD_OPENAI_SOCKET` | OpenAI provider socket for failover |
+| `INFERENCE_CLOUD_OPENROUTER_SOCKET` | OpenRouter provider socket for failover |
+| `INFERENCE_CLOUD_ANTHROPIC_MODEL` | Anthropic fallback model ID |
+| `INFERENCE_CLOUD_GOOGLE_MODEL` | Google fallback model ID |
+| `INFERENCE_CLOUD_OPENAI_MODEL` | OpenAI fallback model ID |
+| `INFERENCE_CLOUD_OPENROUTER_MODEL` | OpenRouter fallback model ID |
 | `INFERENCE_LOCAL_EMBED_SOCKET` | Embedding worker socket |
 | `INFERENCE_LOCAL_SMALL_SOCKET` | Small inference worker socket |
 | `INFERENCE_LOCAL_MEDIUM_SOCKET` | Medium inference worker socket |

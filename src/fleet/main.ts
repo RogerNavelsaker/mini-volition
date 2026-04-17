@@ -106,10 +106,15 @@ function generateKdl(): string {
   const rerankSock = resolve(rerankSocket);
   const lightSock = resolve(lightSocket);
   const heavySock = resolve(heavySocket);
+  const providerModels = new Map(config.agents.map((agent) => [agent.name, agent.model]));
+  const anthropicModel = process.env.INFERENCE_CLOUD_ANTHROPIC_MODEL || providerModels.get("claude") || "";
+  const googleModel = process.env.INFERENCE_CLOUD_GOOGLE_MODEL || providerModels.get("gemini") || "";
+  const openaiModel = process.env.INFERENCE_CLOUD_OPENAI_MODEL || providerModels.get("codex") || "";
+  const openrouterModel = process.env.INFERENCE_CLOUD_OPENROUTER_MODEL || "";
 
   const agentPanes = config.agents.map(a => `
                 pane name="${a.name.toUpperCase()}" command="bash" {
-                    args "-lc" "AGENT_NAME=${a.name} AGENT_PROMPT_MODE=provider INFERENCE_CLOUD_SOCKET='${resolve(runtimeDir, a.socket)}' INFERENCE_CLOUD_MODEL='${a.model}' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='${mailDbPath}' AGENT_JOBS_DB='${jobsDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' FLEET_LIBRARIAN_DB='${libDbPath}' INFERENCE_LOCAL_EMBED_SOCKET='${embedSock}' INFERENCE_LOCAL_SMALL_SOCKET='${lightSock}' INFERENCE_LOCAL_MEDIUM_SOCKET='${heavySock}' agent-runtime < /dev/null"
+                    args "-lc" "AGENT_NAME=${a.name} AGENT_PROMPT_MODE=provider INFERENCE_CLOUD_SOCKET='${resolve(runtimeDir, a.socket)}' INFERENCE_CLOUD_MODEL='${a.model}' INFERENCE_CLOUD_ANTHROPIC_SOCKET='${resolve(runtimeDir, "claude.sock")}' INFERENCE_CLOUD_GOOGLE_SOCKET='${resolve(runtimeDir, "gemini.sock")}' INFERENCE_CLOUD_OPENAI_SOCKET='${resolve(runtimeDir, "openai.sock")}' INFERENCE_CLOUD_OPENROUTER_SOCKET='${resolve(runtimeDir, "openrouter.sock")}' INFERENCE_CLOUD_ANTHROPIC_MODEL='${anthropicModel}' INFERENCE_CLOUD_GOOGLE_MODEL='${googleModel}' INFERENCE_CLOUD_OPENAI_MODEL='${openaiModel}' INFERENCE_CLOUD_OPENROUTER_MODEL='${openrouterModel}' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='${mailDbPath}' AGENT_JOBS_DB='${jobsDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' FLEET_LIBRARIAN_DB='${libDbPath}' INFERENCE_LOCAL_EMBED_SOCKET='${embedSock}' INFERENCE_LOCAL_SMALL_SOCKET='${lightSock}' INFERENCE_LOCAL_MEDIUM_SOCKET='${heavySock}' agent-runtime < /dev/null"
                 }`).join("");
 
   return `layout {
