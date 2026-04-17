@@ -28,7 +28,7 @@ Tier 1 Close:
 - [ ] 1. Complete plan:         tl plan complete <slug> --summary "<outcome>"
 - [ ] 2. Record new learnings:  see `capturing-knowledge`
 - [ ] 3. Switch to integration worktree:
-         cd ../mv-integration
+         cd worktrees/integration
 - [ ] 4. Fast-forward integration from origin (if shared):
          git fetch origin && git merge --ff-only origin/integration    # only if remote exists
 - [ ] 5. Merge the feature (preserve branch shape):
@@ -38,7 +38,7 @@ Tier 1 Close:
 - [ ] 8. Sync state dirs:       sd sync && ml sync && tl sync && cn sync
 - [ ] 9. Retire the feature worktree:
          cd <main-worktree>
-         git worktree remove ../mv-<slug>
+         git worktree remove worktrees/<slug>
          git branch -d <slug>           # -d only; never -D on unmerged work
 ```
 
@@ -72,7 +72,7 @@ Tier 2 Close:
 ### Landing a tier-2 PR (operator sign-off only)
 
 - `gh pr merge <n> --squash --delete-branch` — only with explicit user approval.
-- After merge: `git worktree remove ../mv-<slug>` locally; `git fetch origin` to update `main`.
+- After merge: `git worktree remove worktrees/<slug>` locally; `git fetch origin` to update `main`.
 
 ## Publishing integration to main
 

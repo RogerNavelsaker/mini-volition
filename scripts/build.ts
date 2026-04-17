@@ -1,16 +1,16 @@
-import { readdirSync, existsSync, mkdirSync, unlinkSync, rmSync, writeFileSync, chmodSync } from "fs";
-import { join, basename } from "path";
+import { copyFileSync, existsSync, mkdirSync } from "fs";
+import { join } from "path";
 import { spawnSync } from "bun";
 
 const repoRoot = process.cwd();
 const srcDir = join(repoRoot, "src");
 const binDir = join(repoRoot, "bin");
-const buildDir = join(repoRoot, "build");
+const buildTarget = process.env.BUN_BUILD_TARGET || "bun-linux-x64-modern";
+const runtimeLibRoot = join(repoRoot, "lib", "onnxruntime");
 
 console.log("== building fleet binaries ==");
 
 if (!existsSync(binDir)) mkdirSync(binDir);
-if (!existsSync(buildDir)) mkdirSync(buildDir);
 
 function runOrDie(cmd: string[]) {
   const result = spawnSync(cmd);
@@ -20,61 +20,64 @@ function runOrDie(cmd: string[]) {
   }
 }
 
-// Clean stale build artifacts
-for (const stale of [join(repoRoot, "fleet"), join(buildDir, "fleet")]) {
-  try { unlinkSync(stale); } catch {}
+function ensureDir(path: string) {
+  if (!existsSync(path)) mkdirSync(path, { recursive: true });
 }
 
-// 1. Compile core binaries
-const coreModules = [
+function syncOnnxRuntimeLib() {
+  if (!buildTarget.startsWith("bun-linux-")) return;
+
+  const arch = buildTarget.includes("-arm64") ? "arm64" : "x64";
+  const source = join(repoRoot, "node_modules", "onnxruntime-node", "bin", "napi-v6", "linux", arch, "libonnxruntime.so.1");
+  const targetDir = join(runtimeLibRoot, "linux", arch);
+  const target = join(targetDir, "libonnxruntime.so.1");
+
+  if (!existsSync(source)) {
+    console.warn(`Skipping ONNX runtime library sync; missing ${source}`);
+    return;
+  }
+
+  ensureDir(targetDir);
+  copyFileSync(source, target);
+  console.log(`Synced ONNX runtime library → ${target}`);
+}
+
+const runtimeModules = [
   ["fleet", "fleet"],
   ["agent-mail", "agent-mail"],
-  ["agent-harness", "agent-harness"],
-  ["operator-harness", "operator-harness"],
+  ["agent-runtime", "agent-runtime"],
+  ["operator-console", "operator-console"],
   ["agent-state", "agent-state"],
   ["agent-jobs", "agent-jobs"],
   ["agent-memory", "agent-memory"],
-  ["fleet-digest", "fleet-digest"],
+  ["fleet-reporter", "fleet-reporter"],
   ["fleet-librarian", "fleet-librarian"],
+  ["inference-local-embed", "inference-local-embed"],
+  ["inference-local-rerank", "inference-local-rerank"],
+  ["inference-local-small", "inference-local-small"],
+  ["inference-local-medium", "inference-local-medium"],
+  ["inference-cloud-anthropic", "inference-cloud-anthropic"],
+  ["inference-cloud-google", "inference-cloud-google"],
+  ["inference-cloud-openai", "inference-cloud-openai"],
+  ["inference-cloud-openrouter", "inference-cloud-openrouter"],
 ];
 
-for (const [mod, name] of coreModules) {
-  console.log(`Building ${name}...`);
-  runOrDie(["bun", "build", join(srcDir, mod, "main.ts"), "--compile", "--minify", "--outfile", join(binDir, name)]);
-}
-
-// 2. Build inference and provider workers (Bundles + Wrappers)
-// Inference workers: embed, rerank, light, heavy
-const inferenceWorkers = [
-  [join(srcDir, "fleet-embed", "main.ts"), "fleet-embed"],
-  [join(srcDir, "fleet-rerank", "main.ts"), "fleet-rerank"],
-  [join(srcDir, "fleet-light", "main.ts"), "fleet-light"],
-  [join(srcDir, "fleet-heavy", "main.ts"), "fleet-heavy"],
-];
-
-// Provider workers: claude, gemini, openai, openrouter
-const providerWorkers = [
-  [join(srcDir, "fleet-claude", "main.ts"), "fleet-claude"],
-  [join(srcDir, "fleet-gemini", "main.ts"), "fleet-gemini"],
-  [join(srcDir, "fleet-openai", "main.ts"), "fleet-openai"],
-  [join(srcDir, "fleet-openrouter", "main.ts"), "fleet-openrouter"],
-];
-
-for (const [src, name] of [...inferenceWorkers, ...providerWorkers]) {
-  console.log(`Bundling ${name}...`);
-  const bundle = join(buildDir, `${name}.mjs`);
-  runOrDie(["bun", "build", "--target=bun", "--packages=external", src, "--outfile", bundle]);
-  
-  const binPath = join(binDir, name);
-  writeFileSync(binPath, `#!/usr/bin/env bash
-set -euo pipefail
-script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd -- "$script_dir/.." && pwd)"
-export NODE_PATH="$repo_root/build/node_modules"
-cd "$repo_root"
-exec bun "$repo_root/build/${name}.mjs" "$@"
-`, "utf-8");
-  chmodSync(binPath, 0o755);
+for (const [mod, name] of runtimeModules) {
+  console.log(`Building ${name} for ${buildTarget}...`);
+  runOrDie([
+    "bun",
+    "build",
+    join(srcDir, mod, "main.ts"),
+    "--compile",
+    `--target=${buildTarget}`,
+    "--bytecode",
+    "--format=esm",
+    "--minify",
+    "--production",
+    "--outfile",
+    join(binDir, name),
+  ]);
 }
 
 console.log("Build complete.");
+syncOnnxRuntimeLib();

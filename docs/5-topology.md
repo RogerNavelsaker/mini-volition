@@ -4,7 +4,7 @@ Static roster, dynamic expansion.
 
 ## §Roster
 - **τHarness**: Cloud (Claude/Gemini/OpenAI/OpenRouter).
-- **τInference**: `fleet-embed`, `fleet-rerank`, `fleet-light`, `fleet-heavy`.
+- **τInference**: `inference-local-embed`, `inference-local-rerank`, `inference-local-small`, `inference-local-medium`.
 - **τInfra**: `mail`, `jobs`, `memory`, `state`, `librarian`, `digest`.
 
 ## §Expansion

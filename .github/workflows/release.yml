@@ -1,0 +1,60 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-linux-x64-modern
+            asset_suffix: linux-x64-modern
+          - target: bun-linux-arm64
+            asset_suffix: linux-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build runtime
+        run: BUN_BUILD_TARGET=${{ matrix.target }} bun run scripts/build.ts
+
+      - name: Stage archive
+        run: |
+          set -euo pipefail
+          archive_root="dist/mini-volition-${{ matrix.asset_suffix }}"
+          mkdir -p "$archive_root"
+          cp -r bin config docs prompts scripts lib README.md "$archive_root/"
+          tar -C dist -czf "mini-volition-${{ matrix.asset_suffix }}.tar.gz" "mini-volition-${{ matrix.asset_suffix }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mini-volition-${{ matrix.asset_suffix }}
+          path: mini-volition-${{ matrix.asset_suffix }}.tar.gz
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/**/*.tar.gz

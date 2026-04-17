@@ -1,7 +1,12 @@
 runtime/
 state/
-build/node_modules/
-build/*.mjs
+build/
+dist/
+lib/onnxruntime/
+node_modules/
 zellij-*/
 bin/
 scratchpads/
+worktrees/
+.phloem/
+.llm/skills/*/bin/

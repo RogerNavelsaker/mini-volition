@@ -26,9 +26,9 @@ import type {
 
 const dbPath = process.env.AGENT_MEMORY_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-memory.db");
 const db = new Database(dbPath);
-const embedSocket = process.env.FLEET_EMBED_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/embed.sock");
-const heavySocket = process.env.FLEET_HEAVY_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/heavy.sock");
-const rerankSocket = process.env.FLEET_RERANK_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/rerank.sock");
+const embedSocket = process.env.INFERENCE_LOCAL_EMBED_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/embed.sock");
+const heavySocket = process.env.INFERENCE_LOCAL_MEDIUM_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/heavy.sock");
+const rerankSocket = process.env.INFERENCE_LOCAL_RERANK_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/rerank.sock");
 
 const SKILL = `---
 name: agent-memory
@@ -278,7 +278,7 @@ function requestHyde(query: string): Promise<string | null> {
   });
 }
 
-const lightSocket = process.env.FLEET_LIGHT_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/light.sock");
+const lightSocket = process.env.INFERENCE_LOCAL_SMALL_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/light.sock");
 
 function requestDecomposeKeywords(text: string): Promise<DecomposeKeywordsResponse | null> {
   return new Promise((resolve) => {
@@ -907,7 +907,7 @@ async function compact(agentName: string) {
         }
       } catch {}
     }
-    // Extract entities via LLM (fleet-heavy), fall back to regex deriveFacts
+      // Extract entities via LLM (inference-local-medium), fall back to regex deriveFacts
     const createdByKind = new Map(createdItems.map((item) => [`${item.item_kind}:${item.content}`, item.id]));
     const extractionText = createdItems.map((item) => `${item.item_kind}: ${item.content}`).join("\n");
     const extracted = await requestExtractEntities(extractionText);
@@ -1204,7 +1204,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
     .filter((row) => row.score > 0)
     .sort((left, right) => right.score - left.score);
 
-  // Precision rerank top candidates via fleet-rerank when available
+      // Precision rerank top candidates via inference-local-rerank when available
   let finalRanked = ranked;
   if (ranked.length > 5) {
     const rerankCandidates = ranked.slice(0, 20);
