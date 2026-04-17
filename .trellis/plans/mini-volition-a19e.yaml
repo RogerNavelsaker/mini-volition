@@ -2,10 +2,12 @@ id: mini-volition-a19e
 title: Richer job semantics
 seed: mini-volition-a19e
 spec: mini-volition-a19e
-status: active
+status: done
 createdAt: "2026-04-15T12:43:14.732Z"
-updatedAt: "2026-04-15T12:43:14.732Z"
-summary: Extend agent-jobs with dependencies and lifecycle actions.
+updatedAt: "2026-04-17T15:38:05.944Z"
+completedAt: "2026-04-17T15:38:05.943Z"
+completionSummary: executionGraph (DAG nodes+edges, agent-scoped), autoRetryOrFail (max_retries/retry_count), graph CLI — 55 total tests passing
+summary: "Extend agent-jobs: dependencies, lifecycle actions."
 steps:
   - 1. Update agent-jobs schema to include dependency and metadata fields.
   - 2. Implement dependency tracking and unblocking logic in the job manager.

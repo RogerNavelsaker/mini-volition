@@ -2,8 +2,10 @@ id: mini-volition-f400
 title: Profile-specific Timeout Policy
 seed: mini-volition-f400
 spec: mini-volition-f400
-status: active
+status: done
 createdAt: "2026-04-15T20:40:53.771Z"
-updatedAt: "2026-04-15T20:40:53.771Z"
+updatedAt: "2026-04-17T15:41:44.269Z"
+completedAt: "2026-04-17T15:41:44.268Z"
+completionSummary: Added per-profile turn timeout policy with light/full/max overrides, applied to provider and deadman timeouts, documented env knobs, and validated with unit tests plus a full build.
 summary: Plan to address Profile-specific Timeout Policy
 steps:
