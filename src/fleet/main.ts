@@ -12,6 +12,7 @@ import {
   existsSync,
 } from "fs";
 import { resolve, join, dirname } from "path";
+import { createConnection } from "net";
 import { appendFleetArtifact } from "../state-artifacts/lib";
 
 // When compiled, import.meta.dir points into /$bunfs. When running from source, use the real repository root.
@@ -336,6 +337,55 @@ function isExecutable(path: string): boolean {
   }
 }
 
+type SocketHeartbeat = {
+  ok: true;
+  type: "heartbeat";
+  label: string;
+  pid: number;
+  uptime_ms: number;
+  now: string;
+};
+
+function requestSocketHeartbeat(socketPath: string, timeoutMs = 750): Promise<SocketHeartbeat | null> {
+  return new Promise((resolve) => {
+    if (!accessSafe(socketPath)) {
+      resolve(null);
+      return;
+    }
+    const socket = createConnection(socketPath);
+    let buffer = "";
+    let settled = false;
+    const finish = (value: SocketHeartbeat | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        socket.end();
+      } catch {}
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    socket.on("connect", () => {
+      socket.write(`${JSON.stringify({ type: "heartbeat" })}\n`);
+    });
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf-8");
+      const newline = buffer.indexOf("\n");
+      if (newline === -1) return;
+      try {
+        const parsed = JSON.parse(buffer.slice(0, newline).trim()) as Partial<SocketHeartbeat>;
+        if (parsed?.type === "heartbeat" && parsed?.ok === true && typeof parsed.label === "string") {
+          finish(parsed as SocketHeartbeat);
+          return;
+        }
+      } catch {}
+      finish(null);
+    });
+    socket.on("error", () => finish(null));
+    socket.on("end", () => finish(null));
+  });
+}
+
 function sessionLine(): string {
   const result = spawnSync(["zellij", "list-sessions"]);
   const output = result.stdout.toString().replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
@@ -418,12 +468,19 @@ function governorStatus(agent: string, windowSec: number, turnLimit: number) {
     const cooldownUntilMs = rec?.forced_cooldown_until ? new Date(rec.forced_cooldown_until.endsWith("Z") ? rec.forced_cooldown_until : `${rec.forced_cooldown_until}Z`).getTime() : 0;
     const allowedByCooldown = cooldownUntilMs <= now;
     const windowStartedMs = rec?.window_started_at ? new Date(rec.window_started_at.endsWith("Z") ? rec.window_started_at : `${rec.window_started_at}Z`).getTime() : 0;
-    const windowExpired = !windowStartedMs || (now - windowStartedMs) > windowSec * 1000;
+    const elapsedMs = now - windowStartedMs;
+    const windowMs = windowSec * 1000;
+    const windowExpired = !windowStartedMs || elapsedMs > windowMs;
 
     if (windowExpired && rec) {
+      // Sliding window approximation: linearly decay turn_count based on elapsed time.
+      // If we are past one window, we reset. Otherwise, we decay.
+      const decayRatio = Math.max(0, 1 - (elapsedMs / windowMs));
+      const decayedCount = Math.floor((rec.turn_count || 0) * decayRatio);
+      
       db.run(
-        "UPDATE fleet_governor SET window_started_at = CURRENT_TIMESTAMP, turn_count = 0, forced_cooldown_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE agent_name = ?",
-        [agent],
+        "UPDATE fleet_governor SET window_started_at = CURRENT_TIMESTAMP, turn_count = ?, forced_cooldown_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE agent_name = ?",
+        [decayedCount, agent],
       );
     }
 
@@ -569,7 +626,7 @@ function stopSession() {
   console.log(`fleet session '${sessionName}' stopped`);
 }
 
-function showStatus() {
+async function showStatus() {
   ensureRuntimeDir();
   ensureStateDir();
   if (sessionRunning()) {
@@ -601,10 +658,24 @@ function showStatus() {
   console.log(`agent-state-db: ${stateDb}`);
   console.log(`fleet-db: ${fleetDb}`);
   console.log(`fleet-librarian-db: ${librarianDb}`);
-  console.log(`embed-socket: ${embedSocket}`);
-  console.log(`rerank-socket: ${rerankSocket}`);
-  console.log(`light-socket: ${lightSocket}`);
-  console.log(`heavy-socket: ${heavySocket}`);
+  const socketChecks = [
+    { name: "embed-socket", path: embedSocket },
+    { name: "rerank-socket", path: rerankSocket },
+    { name: "light-socket", path: lightSocket },
+    { name: "heavy-socket", path: heavySocket },
+    { name: "anthropic-socket", path: join(runtimeDir, "claude.sock") },
+    { name: "google-socket", path: join(runtimeDir, "gemini.sock") },
+    { name: "openai-socket", path: join(runtimeDir, "openai.sock") },
+    { name: "openrouter-socket", path: join(runtimeDir, "openrouter.sock") },
+  ];
+  const heartbeats = await Promise.all(socketChecks.map(async (entry) => ({ entry, heartbeat: await requestSocketHeartbeat(entry.path) })));
+  for (const { entry, heartbeat } of heartbeats) {
+    if (heartbeat) {
+      console.log(`${entry.name}: healthy label=${heartbeat.label} pid=${heartbeat.pid} uptime_ms=${heartbeat.uptime_ms} path=${entry.path}`);
+    } else {
+      console.log(`${entry.name}: unavailable ${entry.path}`);
+    }
+  }
   console.log(`state-dir: ${stateDir}`);
 }
 
@@ -636,7 +707,7 @@ switch (process.argv[2]) {
     startSession();
     break;
   case "status":
-    showStatus();
+    await showStatus();
     break;
   case "governor-status":
     console.log(JSON.stringify(governorStatus(process.argv[3] || "", Math.max(1, parseInt(process.argv[4] || "120", 10) || 120), Math.max(1, parseInt(process.argv[5] || "4", 10) || 4))));

@@ -8,6 +8,15 @@
 import { unlinkSync } from "fs";
 import { createServer, type Socket } from "net";
 
+export type HeartbeatRequest = { type: "heartbeat" };
+export type HeartbeatResponse = {
+  ok: true;
+  type: "heartbeat";
+  label: string;
+  pid: number;
+  uptime_ms: number;
+  now: string;
+};
 export type TurnRequest = {
   type: "turn";
   model: string;
@@ -48,7 +57,19 @@ export function startProviderServer(socketPath: string, handler: ProviderHandler
         if (!line) continue;
 
         try {
-          const request = JSON.parse(line) as TurnRequest;
+          const request = JSON.parse(line) as TurnRequest | HeartbeatRequest;
+          if (request.type === "heartbeat") {
+            const response: HeartbeatResponse = {
+              ok: true,
+              type: "heartbeat",
+              label,
+              pid: process.pid,
+              uptime_ms: Math.round(process.uptime() * 1000),
+              now: new Date().toISOString(),
+            };
+            connection.write(`${JSON.stringify(response)}\n`);
+            continue;
+          }
           if (request.type !== "turn") {
             connection.write(`${JSON.stringify({ error: `Unknown request type: ${request.type}` })}\n`);
             continue;

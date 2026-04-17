@@ -1,6 +1,15 @@
 import { unlinkSync } from "fs";
 import { createServer, type Socket } from "net";
 
+export type HeartbeatRequest = { type: "heartbeat" };
+export type HeartbeatResponse = {
+  ok: true;
+  type: "heartbeat";
+  label: string;
+  pid: number;
+  uptime_ms: number;
+  now: string;
+};
 export type RequestHandler = (request: any) => Promise<any>;
 
 export function startInferenceServer(socketPath: string, handler: RequestHandler, label: string) {
@@ -24,6 +33,18 @@ export function startInferenceServer(socketPath: string, handler: RequestHandler
 
         try {
           const request = JSON.parse(line);
+          if (request?.type === "heartbeat") {
+            const response: HeartbeatResponse = {
+              ok: true,
+              type: "heartbeat",
+              label,
+              pid: process.pid,
+              uptime_ms: Math.round(process.uptime() * 1000),
+              now: new Date().toISOString(),
+            };
+            connection.write(`${JSON.stringify(response)}\n`);
+            continue;
+          }
           const response = await handler(request);
           connection.write(`${JSON.stringify(response)}\n`);
         } catch (error) {
