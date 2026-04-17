@@ -8,6 +8,7 @@ import { join, dirname } from "path";
 import { ensureSchema as ensureMemorySchema } from "../agent-memory/schema";
 import { appendMemorySourceArtifact } from "../state-artifacts/lib";
 import { chooseRetrievalMode, chooseTurnProfile, turnProfileConfig, retryConfig, type RetrievalMode, type TurnProfile } from "./policy";
+import { runDispatchLoop } from "./dispatch";
 import { ensureTurnJournal, recoverInterruptedTurns, replayPolicyForAction, type TurnCheckpoint, type TurnPhase } from "./recovery";
 
 const name = process.env.AGENT_NAME;
@@ -2308,33 +2309,55 @@ async function runWorker() {
     recordWorking("system", `Recovered ${recoveredTurns.recovered} interrupted turn(s) older than stale TTL`);
   }
   
-  while (true) {
-    const governor = readGovernor();
-    if (!governor.allowed && governor.forced_cooldown_until) {
-      const cooldownUntil = governor.forced_cooldown_until;
-      const cooldownDeadline = new Date(cooldownUntil.endsWith("Z") ? cooldownUntil : `${cooldownUntil}Z`).getTime();
-      setRuntimeState("cooldown", "refractory_window", "governor", null, cooldownUntil);
-      while (Date.now() < cooldownDeadline) {
-        const hotWake = await selectNextWake({ allowWorkload: false, blockingMail: false });
-        if (hotWake) {
-          await processWakeEvent(hotWake, {
-            successStatus: "cooldown",
-            successCurrentTask: "refractory_window",
-            successWakeReason: "governor",
-            successCooldownUntil: cooldownUntil,
-          });
+  const dispatchResult = await runDispatchLoop(
+    {
+      selectWake: async () => {
+        const governor = readGovernor();
+        if (!governor.allowed && governor.forced_cooldown_until) {
+          const cooldownUntil = governor.forced_cooldown_until;
+          const cooldownDeadline = new Date(cooldownUntil.endsWith("Z") ? cooldownUntil : `${cooldownUntil}Z`).getTime();
+          setRuntimeState("cooldown", "refractory_window", "governor", null, cooldownUntil);
+          while (Date.now() < cooldownDeadline) {
+            const hotWake = await selectNextWake({ allowWorkload: false, blockingMail: false });
+            if (hotWake) {
+              await processWakeEvent(hotWake, {
+                successStatus: "cooldown",
+                successCurrentTask: "refractory_window",
+                successWakeReason: "governor",
+                successCooldownUntil: cooldownUntil,
+              });
+            }
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+          return null;
         }
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-      if (Date.now() < cooldownDeadline) {
-        continue;
-      }
-    }
-
-    const wake = await selectNextWake();
-    if (!wake) continue;
-    await processWakeEvent(wake);
-  }
+        return await selectNextWake();
+      },
+      processWake: async (wake) => {
+        await processWakeEvent(wake as Awaited<ReturnType<typeof selectNextWake>>);
+      },
+    },
+    {
+      maxConsecutiveErrors: 5,
+      baseBackoffMs: 2_000,
+      backoffMultiplier: 2.0,
+      maxBackoffMs: 30_000,
+      onError: (error, consecutiveErrors) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[DISPATCH ERROR ${consecutiveErrors}/5] ${msg}`);
+        setRuntimeState("error", null, "dispatch_error", msg);
+        recordWorking("system", `Dispatch loop error ${consecutiveErrors}: ${msg}`);
+      },
+      onFatal: (error, consecutiveErrors) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[DISPATCH FATAL] ${consecutiveErrors} consecutive errors — exiting: ${msg}`);
+        setRuntimeState("failed", null, "dispatch_fatal", `dispatch loop exited after ${consecutiveErrors} consecutive errors: ${msg}`);
+        sendMessage("operator", "urgent", `[DISPATCH FATAL] ${name} harness exited after ${consecutiveErrors} consecutive errors: ${msg}`);
+      },
+    },
+  );
+  console.log(`--- harness for ${name} stopped (${dispatchResult.reason}, ${dispatchResult.totalIterations} iterations) ---`);
+  process.exit(dispatchResult.reason === "fatal" ? 1 : 0);
 }
 
 runWorker();
