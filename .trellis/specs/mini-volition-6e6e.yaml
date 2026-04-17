@@ -1,0 +1,13 @@
+id: mini-volition-6e6e
+title: Multi-source wake orchestration
+seed: mini-volition-6e6e
+status: active
+createdAt: "2026-04-15T12:43:14.998Z"
+updatedAt: "2026-04-15T12:43:14.998Z"
+objective: Expand the wake model to include alarms, reminders, and subprocess completions.
+constraints:
+  - Must unify diverse wake sources into a single model.
+acceptance:
+  - Alarms and reminders trigger wakes.
+  - Subprocess completion events are captured as wakes.
+references:

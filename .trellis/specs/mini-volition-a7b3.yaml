@@ -1,0 +1,10 @@
+id: mini-volition-a7b3
+title: Urgent Wake Preemption Logic
+seed: mini-volition-a7b3
+status: active
+createdAt: "2026-04-15T20:40:58.336Z"
+updatedAt: "2026-04-17T10:23:41.206Z"
+objective: Implement the required components, add tests, and verify the changes.
+constraints:
+acceptance:
+references:

@@ -1,0 +1,12 @@
+id: mini-volition-e613
+title: Immutable Audit Log
+seed: mini-volition-e613
+spec: mini-volition-e613
+status: active
+createdAt: "2026-04-15T12:43:36.955Z"
+updatedAt: "2026-04-15T12:43:36.955Z"
+summary: Implement the 'Black Box' audit logging system.
+steps:
+  - 1. Design and implement an append-only store (e.g., SQLite or journaled file).
+  - 2. Add logging hooks to the agent-state and agent-mail services.
+  - 3. Ensure all state transitions and message exchanges trigger audit entries.

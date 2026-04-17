@@ -1,0 +1,10 @@
+id: mini-volition-852d
+title: Source Group Classification
+seed: mini-volition-852d
+status: active
+createdAt: "2026-04-15T20:40:54.072Z"
+updatedAt: "2026-04-17T10:23:40.634Z"
+objective: Implement the required components, add tests, and verify the changes.
+constraints:
+acceptance:
+references:

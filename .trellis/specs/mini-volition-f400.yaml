@@ -1,0 +1,10 @@
+id: mini-volition-f400
+title: Profile-specific Timeout Policy
+seed: mini-volition-f400
+status: active
+createdAt: "2026-04-15T20:40:53.706Z"
+updatedAt: "2026-04-17T10:23:42.063Z"
+objective: Implement the required components, add tests, and verify the changes.
+constraints:
+acceptance:
+references:

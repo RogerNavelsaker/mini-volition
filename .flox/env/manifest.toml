@@ -5,6 +5,7 @@ bun.pkg-path = "bun"
 sqlite.pkg-path = "sqlite"
 zellij.pkg-path = "zellij"
 "seeds".flake = "github:RogerNavelsaker/nixpkg-seeds"
+"seeds".outputs = ["out", "sd"]
 "mulch".flake = "github:RogerNavelsaker/nixpkg-mulch"
 "mulch".outputs = ["out", "ml"]
 "trellis".flake = "github:RogerNavelsaker/nixpkg-trellis"
@@ -20,11 +21,33 @@ WORKSPACE_META = "mini-volition"
 on-activate = '''
   export META_REPO_ROOT="$FLOX_ENV_PROJECT"
   export SHARED_WORKSPACE_ROOT="$FLOX_ENV_PROJECT"
+
+  # PATH applies in all modes (interactive and `flox activate -- ...`).
+  # Aliases stay in [profile.common] because they only matter interactively.
+  export PATH="$META_REPO_ROOT/.flox/bin:$META_REPO_ROOT/bin:$META_REPO_ROOT/.llm/skills/coordinating-agents/bin:$PATH"
+
+  # Bootstrap skill-local binaries (source + bin stay inside each skill dir).
+  _phloem_src="$META_REPO_ROOT/.llm/skills/coordinating-agents/main.ts"
+  _phloem_build="$META_REPO_ROOT/.llm/skills/coordinating-agents/build.ts"
+  _phloem_bin="$META_REPO_ROOT/.llm/skills/coordinating-agents/bin/phloem"
+  _ph_bin="$META_REPO_ROOT/.llm/skills/coordinating-agents/bin/ph"
+  if [ -f "$_phloem_src" ]; then
+    if [ ! -x "$_phloem_bin" ] \
+       || [ ! -x "$_ph_bin" ] \
+       || [ "$_phloem_src"   -nt "$_phloem_bin" ] \
+       || [ "$_phloem_build" -nt "$_phloem_bin" ] \
+       || [ "$_phloem_build" -nt "$_ph_bin" ]; then
+      echo "[flox] building phloem..." >&2
+      (cd "$META_REPO_ROOT" && bun run "$_phloem_build") \
+        || echo "[flox] phloem build failed (non-fatal; run build.ts manually)" >&2
+    fi
+  fi
+  unset _phloem_src _phloem_build _phloem_bin _ph_bin
 '''
 
 [profile]
 common = """
-  export PATH="$META_REPO_ROOT/bin:$PATH"
+  alias fx="$META_REPO_ROOT/.flox/bin/fx"
   alias workspace-bootstrap="$META_REPO_ROOT/scripts/bootstrap"
   alias workspace-status="$META_REPO_ROOT/scripts/status"
 """

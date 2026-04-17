@@ -1,0 +1,12 @@
+id: mini-volition-f9f9
+title: Diagnostic Deadman Switch
+seed: mini-volition-f9f9
+spec: mini-volition-f9f9
+status: active
+createdAt: "2026-04-15T14:29:58.490Z"
+updatedAt: "2026-04-15T14:29:58.490Z"
+summary: Implement the 'AgentGhosted' diagnostic and recovery alert.
+steps:
+  - 1. Enhance processWakeEvent to detect unhandled exits or timeouts via a success flag.
+  - 2. Update assembleTurnContext to check for 'ghosted' turns in the agent state.
+  - 3. Inject a diagnostic §ORIENTATION block into the prompt if a failure was detected.

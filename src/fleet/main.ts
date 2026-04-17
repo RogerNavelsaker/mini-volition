@@ -57,11 +57,11 @@ function loadConfig(): { agents: AgentConfig[] } {
     }
   }
 
-  // Allow environment variable overrides: FLEET_<NAME>_MODEL
+  // Allow environment variable overrides: INFERENCE_CLOUD_<NAME>_MODEL
   return {
     agents: agents.map(a => ({
       ...a,
-      model: process.env[`FLEET_${a.name.toUpperCase()}_MODEL`] || a.model,
+      model: process.env[`INFERENCE_CLOUD_${a.name.toUpperCase()}_MODEL`] || a.model,
     }))
   };
 }
@@ -82,17 +82,17 @@ const geminiBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/gmi";
 const codexBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/cod";
 
 const mailBin = join(binDir, "agent-mail");
-const harnessBin = join(binDir, "agent-harness");
-const operatorBin = join(binDir, "operator-harness");
+const harnessBin = join(binDir, "agent-runtime");
+const operatorBin = join(binDir, "operator-console");
 const agentStateBin = join(binDir, "agent-state");
 const agentJobsBin = join(binDir, "agent-jobs");
 const agentMemoryBin = join(binDir, "agent-memory");
-const digestBin = join(binDir, "fleet-digest");
+const digestBin = join(binDir, "fleet-reporter");
 const librarianBin = join(binDir, "fleet-librarian");
-const embedBin = join(binDir, "fleet-embed");
-const rerankBin = join(binDir, "fleet-rerank");
-const lightBin = join(binDir, "fleet-light");
-const heavyBin = join(binDir, "fleet-heavy");
+const embedBin = join(binDir, "inference-local-embed");
+const rerankBin = join(binDir, "inference-local-rerank");
+const lightBin = join(binDir, "inference-local-small");
+const heavyBin = join(binDir, "inference-local-medium");
 
 function generateKdl(): string {
   const config = loadConfig();
@@ -108,7 +108,7 @@ function generateKdl(): string {
 
   const agentPanes = config.agents.map(a => `
                 pane name="${a.name.toUpperCase()}" command="bash" {
-                    args "-lc" "AGENT_NAME=${a.name} AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='${resolve(runtimeDir, a.socket)}' FLEET_PROVIDER_MODEL='${a.model}' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='${mailDbPath}' AGENT_JOBS_DB='${jobsDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' FLEET_LIBRARIAN_DB='${libDbPath}' FLEET_EMBED_SOCKET='${embedSock}' FLEET_LIGHT_SOCKET='${lightSock}' FLEET_HEAVY_SOCKET='${heavySock}' agent-harness < /dev/null"
+                    args "-lc" "AGENT_NAME=${a.name} AGENT_PROMPT_MODE=provider INFERENCE_CLOUD_SOCKET='${resolve(runtimeDir, a.socket)}' INFERENCE_CLOUD_MODEL='${a.model}' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='${mailDbPath}' AGENT_JOBS_DB='${jobsDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' FLEET_LIBRARIAN_DB='${libDbPath}' INFERENCE_LOCAL_EMBED_SOCKET='${embedSock}' INFERENCE_LOCAL_SMALL_SOCKET='${lightSock}' INFERENCE_LOCAL_MEDIUM_SOCKET='${heavySock}' agent-runtime < /dev/null"
                 }`).join("");
 
   return `layout {
@@ -128,13 +128,13 @@ function generateKdl(): string {
                     args "-lc" "AGENT_MAIL_DB='${mailDbPath}' agent-mail tail public < /dev/null"
                 }
                 pane name="DIGEST" command="bash" {
-                    args "-lc" "AGENT_MAIL_DB='${mailDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' AGENT_MAIL_BIN='agent-mail' FLEET_LIGHT_SOCKET='${lightSock}' fleet-digest < /dev/null"
+                    args "-lc" "AGENT_MAIL_DB='${mailDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' AGENT_MAIL_BIN='agent-mail' INFERENCE_LOCAL_SMALL_SOCKET='${lightSock}' fleet-reporter < /dev/null"
                 }
                 pane name="MEMORY" command="bash" {
                     args "-lc" "AGENT_JOBS_DB='${jobsDbPath}' AGENT_MEMORY_DB='${memoryDbPath}' AGENT_STATE_DB='${stateDbPath}' FLEET_LIBRARIAN_DB='${libDbPath}' AGENT_MEMORY_BIN='agent-memory' fleet-librarian < /dev/null"
                 }
                 pane name="OPERATOR" focus=true command="bash" {
-                    args "-lc" "AGENT_MAIL_DB='${mailDbPath}' operator-harness"
+                    args "-lc" "AGENT_MAIL_DB='${mailDbPath}' operator-console"
                 }
             }
         }
@@ -144,18 +144,18 @@ function generateKdl(): string {
         pane split_direction="horizontal" {
             pane split_direction="vertical" {
                 pane name="CLAUDE-API" command="bash" {
-                    args "-lc" "FLEET_CLAUDE_SOCKET='${resolve(runtimeDir, "claude.sock")}' fleet-claude < /dev/null"
+                    args "-lc" "INFERENCE_CLOUD_ANTHROPIC_SOCKET='${resolve(runtimeDir, "claude.sock")}' inference-cloud-anthropic < /dev/null"
                 }
                 pane name="GEMINI-API" command="bash" {
-                    args "-lc" "FLEET_GEMINI_SOCKET='${resolve(runtimeDir, "gemini.sock")}' fleet-gemini < /dev/null"
+                    args "-lc" "INFERENCE_CLOUD_GOOGLE_SOCKET='${resolve(runtimeDir, "gemini.sock")}' inference-cloud-google < /dev/null"
                 }
             }
             pane split_direction="vertical" {
                 pane name="OPENAI-API" command="bash" {
-                    args "-lc" "FLEET_OPENAI_SOCKET='${resolve(runtimeDir, "openai.sock")}' fleet-openai < /dev/null"
+                    args "-lc" "INFERENCE_CLOUD_OPENAI_SOCKET='${resolve(runtimeDir, "openai.sock")}' inference-cloud-openai < /dev/null"
                 }
                 pane name="OPENROUTER-API" command="bash" {
-                    args "-lc" "FLEET_OPENROUTER_SOCKET='${resolve(runtimeDir, "openrouter.sock")}' fleet-openrouter < /dev/null"
+                    args "-lc" "INFERENCE_CLOUD_OPENROUTER_SOCKET='${resolve(runtimeDir, "openrouter.sock")}' inference-cloud-openrouter < /dev/null"
                 }
             }
         }
@@ -165,18 +165,18 @@ function generateKdl(): string {
         pane split_direction="horizontal" {
             pane split_direction="vertical" {
                 pane name="EMBED" command="bash" {
-                    args "-lc" "FLEET_EMBED_SOCKET='${embedSock}' fleet-embed < /dev/null"
+                    args "-lc" "INFERENCE_LOCAL_EMBED_SOCKET='${embedSock}' inference-local-embed < /dev/null"
                 }
                 pane name="RERANK" command="bash" {
-                    args "-lc" "FLEET_RERANK_SOCKET='${rerankSock}' fleet-rerank < /dev/null"
+                    args "-lc" "INFERENCE_LOCAL_RERANK_SOCKET='${rerankSock}' inference-local-rerank < /dev/null"
                 }
             }
             pane split_direction="vertical" {
                 pane name="LIGHT" command="bash" {
-                    args "-lc" "FLEET_LIGHT_SOCKET='${lightSock}' fleet-light < /dev/null"
+                    args "-lc" "INFERENCE_LOCAL_SMALL_SOCKET='${lightSock}' inference-local-small < /dev/null"
                 }
                 pane name="HEAVY" command="bash" {
-                    args "-lc" "FLEET_HEAVY_SOCKET='${heavySock}' fleet-heavy < /dev/null"
+                    args "-lc" "INFERENCE_LOCAL_MEDIUM_SOCKET='${heavySock}' inference-local-medium < /dev/null"
                 }
             }
         }
@@ -581,17 +581,17 @@ function showStatus() {
   }
 
   console.log(`agent-mail-bin: ${isExecutable(mailBin) ? "ready" : "missing"} ${mailBin}`);
-  console.log(`agent-harness-bin: ${isExecutable(harnessBin) ? "ready" : "missing"} ${harnessBin}`);
+  console.log(`agent-runtime-bin: ${isExecutable(harnessBin) ? "ready" : "missing"} ${harnessBin}`);
   console.log(`agent-state-bin: ${isExecutable(agentStateBin) ? "ready" : "missing"} ${agentStateBin}`);
   console.log(`agent-jobs-bin: ${isExecutable(agentJobsBin) ? "ready" : "missing"} ${agentJobsBin}`);
   console.log(`agent-memory-bin: ${isExecutable(agentMemoryBin) ? "ready" : "missing"} ${agentMemoryBin}`);
-  console.log(`operator-harness-bin: ${isExecutable(operatorBin) ? "ready" : "missing"} ${operatorBin}`);
-  console.log(`fleet-digest-bin: ${isExecutable(digestBin) ? "ready" : "missing"} ${digestBin}`);
+  console.log(`operator-console-bin: ${isExecutable(operatorBin) ? "ready" : "missing"} ${operatorBin}`);
+  console.log(`fleet-reporter-bin: ${isExecutable(digestBin) ? "ready" : "missing"} ${digestBin}`);
   console.log(`fleet-librarian-bin: ${isExecutable(librarianBin) ? "ready" : "missing"} ${librarianBin}`);
-  console.log(`fleet-embed-bin: ${isExecutable(embedBin) ? "ready" : "missing"} ${embedBin}`);
-  console.log(`fleet-rerank-bin: ${isExecutable(rerankBin) ? "ready" : "missing"} ${rerankBin}`);
-  console.log(`fleet-light-bin: ${isExecutable(lightBin) ? "ready" : "missing"} ${lightBin}`);
-  console.log(`fleet-heavy-bin: ${isExecutable(heavyBin) ? "ready" : "missing"} ${heavyBin}`);
+  console.log(`inference-local-embed-bin: ${isExecutable(embedBin) ? "ready" : "missing"} ${embedBin}`);
+  console.log(`inference-local-rerank-bin: ${isExecutable(rerankBin) ? "ready" : "missing"} ${rerankBin}`);
+  console.log(`inference-local-small-bin: ${isExecutable(lightBin) ? "ready" : "missing"} ${lightBin}`);
+  console.log(`inference-local-medium-bin: ${isExecutable(heavyBin) ? "ready" : "missing"} ${heavyBin}`);
   console.log(`claude-bin: ${isExecutable(claudeBin) ? "ready" : "missing"} ${claudeBin}`);
   console.log(`gemini-bin: ${isExecutable(geminiBin) ? "ready" : "missing"} ${geminiBin}`);
   console.log(`codex-bin: ${isExecutable(codexBin) ? "ready" : "missing"} ${codexBin}`);

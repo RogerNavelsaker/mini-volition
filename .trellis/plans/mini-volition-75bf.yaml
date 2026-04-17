@@ -1,0 +1,13 @@
+id: mini-volition-75bf
+title: Refractory scheduler
+seed: mini-volition-75bf
+spec: mini-volition-75bf
+status: active
+createdAt: "2026-04-15T12:43:14.946Z"
+updatedAt: "2026-04-15T14:56:38.527Z"
+summary: Implement source-grouped scheduling and cooldowns.
+steps:
+  - 1. Define SourceGroup categories in the scheduler configuration.
+  - 2. Implement group-level state tracking for cooldowns.
+  - 3. Update selectNextWake to filter sources based on group cooldown state.
+  - 4. Add randomized jitter (10-30s) to the refractory cooldown period.

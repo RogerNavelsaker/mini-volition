@@ -1,0 +1,12 @@
+id: mini-volition-71a5
+title: Graph-aware retrieval with token budgets
+seed: mini-volition-71a5
+status: active
+createdAt: "2026-04-15T12:43:36.684Z"
+updatedAt: "2026-04-15T17:34:55.005Z"
+objective: Integrate token budget awareness into the graph-traversal retrieval step. Currently, the system expands entities and links until a hard count is reached. This update will push the budgetSection logic down into the memory service, allowing it to estimate token costs (chars/4) during expansion and prioritize the most central/relevant nodes until the budget is exhausted.
+constraints:
+  - Must use PageRank or Centrality scores to prioritize which nodes to keep when budget is tight.
+acceptance:
+  - Retrieval results for a 2000-token budget consistently fill ~1900-2000 tokens without exceeding the limit.
+references:

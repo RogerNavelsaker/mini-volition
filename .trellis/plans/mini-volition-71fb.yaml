@@ -1,0 +1,12 @@
+id: mini-volition-71fb
+title: Proactive context loading
+seed: mini-volition-71fb
+spec: mini-volition-71fb
+status: active
+createdAt: "2026-04-15T12:43:36.845Z"
+updatedAt: "2026-04-15T12:43:36.845Z"
+summary: Implement pre-fetching logic in the agent harness.
+steps:
+  - 1. Create a background task in the harness that monitors agent current_task changes.
+  - 2. Implement a 'pre-fetch' retrieval mode in agent-memory.
+  - 3. Populate a local context cache for the agent with pre-fetched artifacts.

@@ -1,0 +1,12 @@
+id: mini-volition-c9a9
+title: Split-brain per-profile retry/timeout
+seed: mini-volition-c9a9
+spec: mini-volition-c9a9
+status: active
+createdAt: "2026-04-15T12:43:14.840Z"
+updatedAt: "2026-04-15T12:43:14.840Z"
+summary: Implement profile-aware execution limits and retry policies.
+steps:
+  - 1. Define timeout and retry constants per TurnProfile (light, standard, heavy).
+  - 2. Update the harness to apply profile-specific deadlines during inference calls.
+  - 3. Refactor retry logic to use profile-aware parameters.

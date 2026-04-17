@@ -1,0 +1,12 @@
+id: mini-volition-645d
+title: Self-repair and dynamic topology
+seed: mini-volition-645d
+spec: mini-volition-645d
+status: active
+createdAt: "2026-04-15T12:44:00.830Z"
+updatedAt: "2026-04-15T12:44:00.830Z"
+summary: Implement failure detection and self-repair logic.
+steps:
+  - 1. Implement a failure counter and threshold in the job scheduler.
+  - 2. Implement job reassignment logic when failure thresholds are met.
+  - 3. Add an escalation path for requesting additional agent capacity.

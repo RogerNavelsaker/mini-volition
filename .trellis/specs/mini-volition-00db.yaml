@@ -1,0 +1,12 @@
+id: mini-volition-00db
+title: Optimize GPU Muscle Offload
+seed: mini-volition-00db
+status: active
+createdAt: "2026-04-15T12:43:15.218Z"
+updatedAt: "2026-04-15T17:41:06.798Z"
+objective: Refine the muscle offload protocol for maximum reliability and throughput. Implement Unix socket heartbeat checks, automated worker load-balancing based on socket pressure, and optimized binary serialization (e.g., MsgPack or direct Buffer transfer) for heavy embedding payloads. Ensure the harness can gracefully fail back to a secondary worker or a local CPU fallback if a GPU worker hangs.
+constraints:
+  - Socket timeouts must be granular (e.g., 5s for connect, 30s for inference).
+acceptance:
+  - Successful failover to 'fleet-light' if 'fleet-heavy' socket is disconnected mid-request.
+references:

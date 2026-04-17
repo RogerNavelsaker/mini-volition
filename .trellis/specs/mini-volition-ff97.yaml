@@ -1,0 +1,12 @@
+id: mini-volition-ff97
+title: Raw-mode memory option
+seed: mini-volition-ff97
+status: active
+createdAt: "2026-04-15T12:43:36.579Z"
+updatedAt: "2026-04-15T17:34:54.949Z"
+objective: Support 'Raw-Mode' storage for recent memory tiers. The current ingest process summarizes artifacts immediately, which can lead to loss of granular detail (e.g., exact error messages or code snippets). Raw-mode will preserve the verbatim text for Tier 1 and Tier 2 artifacts, only triggering lossy summarization upon promotion to Tier 3 (Archival).
+constraints:
+  - Raw fragments must have a configurable retention period or character limit.
+acceptance:
+  - Working memory context includes exact verbatim snippets from the previous two turns.
+references:

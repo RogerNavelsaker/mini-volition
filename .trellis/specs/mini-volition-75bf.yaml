@@ -1,0 +1,14 @@
+id: mini-volition-75bf
+title: Refractory scheduler
+seed: mini-volition-75bf
+status: active
+createdAt: "2026-04-15T12:43:14.892Z"
+updatedAt: "2026-04-15T17:30:14.728Z"
+objective: "Implement a randomized refractory period for non-urgent wake sources. This prevents 'resonance' loops where two agents wake each other in a tight, synchronous feedback cycle. Categorize all wake sources into 'Hot' (Senses: Direct Mail, Synchronous Chat) and 'Refractory' (Workload: Internal Jobs, Inboxes, Alarms). Hot sources trigger immediately; Refractory sources trigger only after a randomized 10-30s cooldown."
+constraints:
+  - The cooldown must be group-aware (e.g., all internal jobs share one cooldown group).
+  - Randomization must use a cryptographically weak but sufficient jitter (Math.random).
+acceptance:
+  - Successful demonstration of randomized delay between sequential internal jobs.
+  - Direct @mentions bypass the refractory period entirely.
+references:

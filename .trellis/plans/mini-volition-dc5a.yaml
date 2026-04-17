@@ -1,0 +1,12 @@
+id: mini-volition-dc5a
+title: Escalation severity/routing
+seed: mini-volition-dc5a
+spec: mini-volition-dc5a
+status: active
+createdAt: "2026-04-15T12:44:01.262Z"
+updatedAt: "2026-04-15T12:44:01.262Z"
+summary: Implement smart escalation routing.
+steps:
+  - 1. Define escalation severity levels and routing policies in the governance config.
+  - 2. Update the harness to suggest routing based on task context.
+  - 3. Implement enforcement of floor/ceiling routing rules.

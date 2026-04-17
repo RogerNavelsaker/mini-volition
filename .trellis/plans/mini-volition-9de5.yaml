@@ -1,0 +1,12 @@
+id: mini-volition-9de5
+title: Focus protocol
+seed: mini-volition-9de5
+spec: mini-volition-9de5
+status: active
+createdAt: "2026-04-15T12:44:00.601Z"
+updatedAt: "2026-04-15T12:44:00.601Z"
+summary: Implement focus mode lifecycle management.
+steps:
+  - 1. Define FocusAction and associated metadata (duration, target channels).
+  - 2. Implement focus mode state in the agent harness.
+  - 3. Add a background task to restore subscriptions once focus period expires.

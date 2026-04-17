@@ -1,0 +1,12 @@
+id: mini-volition-fb48
+title: Soft-delete with GC
+seed: mini-volition-fb48
+status: active
+createdAt: "2026-04-15T12:44:00.883Z"
+updatedAt: "2026-04-15T17:41:32.552Z"
+objective: Implement a comprehensive garbage collection (GC) phase in the memory librarian. This phase will identify and drop memory artifacts older than the configured retention period (e.g., Tier 1 logs > 7 days, Tier 2 summaries > 30 days). The GC must also clean orphaned FTS5 index entries and unreferenced search index rows to maintain SQLite performance and disk efficiency.
+constraints:
+  - Retention policies must be configurable per agent/tier.
+acceptance:
+  - SQLite VACUUM shows significant reduction in database size after a GC run.
+references:

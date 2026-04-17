@@ -1,0 +1,10 @@
+id: mini-volition-d7ed
+title: Randomized Cooldown Implementation
+seed: mini-volition-d7ed
+status: active
+createdAt: "2026-04-15T20:40:54.239Z"
+updatedAt: "2026-04-17T10:23:41.605Z"
+objective: Implement the required components, add tests, and verify the changes.
+constraints:
+acceptance:
+references:

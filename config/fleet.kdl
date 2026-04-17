@@ -10,13 +10,13 @@ layout {
         pane split_direction="horizontal" {
             pane split_direction="vertical" {
                 pane name="CLAUDE" command="bash" {
-                    args "-lc" "AGENT_NAME=claude AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='./runtime/claude.sock' FLEET_PROVIDER_MODEL='claude-sonnet-4-20250514' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_LIGHT_SOCKET='./runtime/light.sock' FLEET_HEAVY_SOCKET='./runtime/heavy.sock' agent-harness < /dev/null"
+                    args "-lc" "AGENT_NAME=claude AGENT_PROMPT_MODE=provider INFERENCE_CLOUD_SOCKET='./runtime/claude.sock' INFERENCE_CLOUD_MODEL='claude-sonnet-4-20250514' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' INFERENCE_LOCAL_EMBED_SOCKET='./runtime/embed.sock' INFERENCE_LOCAL_SMALL_SOCKET='./runtime/light.sock' INFERENCE_LOCAL_MEDIUM_SOCKET='./runtime/heavy.sock' agent-runtime < /dev/null"
                 }
                 pane name="GEMINI" command="bash" {
-                    args "-lc" "AGENT_NAME=gemini AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='./runtime/gemini.sock' FLEET_PROVIDER_MODEL='gemini-2.5-pro' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_LIGHT_SOCKET='./runtime/light.sock' FLEET_HEAVY_SOCKET='./runtime/heavy.sock' agent-harness < /dev/null"
+                    args "-lc" "AGENT_NAME=gemini AGENT_PROMPT_MODE=provider INFERENCE_CLOUD_SOCKET='./runtime/gemini.sock' INFERENCE_CLOUD_MODEL='gemini-2.5-pro' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' INFERENCE_LOCAL_EMBED_SOCKET='./runtime/embed.sock' INFERENCE_LOCAL_SMALL_SOCKET='./runtime/light.sock' INFERENCE_LOCAL_MEDIUM_SOCKET='./runtime/heavy.sock' agent-runtime < /dev/null"
                 }
                 pane name="CODEX" command="bash" {
-                    args "-lc" "AGENT_NAME=codex AGENT_PROMPT_MODE=provider FLEET_PROVIDER_SOCKET='./runtime/openai.sock' FLEET_PROVIDER_MODEL='o3' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' FLEET_EMBED_SOCKET='./runtime/embed.sock' FLEET_LIGHT_SOCKET='./runtime/light.sock' FLEET_HEAVY_SOCKET='./runtime/heavy.sock' agent-harness < /dev/null"
+                    args "-lc" "AGENT_NAME=codex AGENT_PROMPT_MODE=provider INFERENCE_CLOUD_SOCKET='./runtime/openai.sock' INFERENCE_CLOUD_MODEL='o3' AGENT_MAIL_BIN='agent-mail' AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' INFERENCE_LOCAL_EMBED_SOCKET='./runtime/embed.sock' INFERENCE_LOCAL_SMALL_SOCKET='./runtime/light.sock' INFERENCE_LOCAL_MEDIUM_SOCKET='./runtime/heavy.sock' agent-runtime < /dev/null"
                 }
             }
             pane split_direction="vertical" {
@@ -24,13 +24,13 @@ layout {
                     args "-lc" "AGENT_MAIL_DB='./runtime/agent-mail.db' agent-mail tail public < /dev/null"
                 }
                 pane name="DIGEST" command="bash" {
-                    args "-lc" "AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' AGENT_MAIL_BIN='agent-mail' FLEET_LIGHT_SOCKET='./runtime/light.sock' fleet-digest < /dev/null"
+                    args "-lc" "AGENT_MAIL_DB='./runtime/agent-mail.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' AGENT_MAIL_BIN='agent-mail' INFERENCE_LOCAL_SMALL_SOCKET='./runtime/light.sock' fleet-reporter < /dev/null"
                 }
                 pane name="MEMORY" command="bash" {
                     args "-lc" "AGENT_JOBS_DB='./runtime/agent-jobs.db' AGENT_MEMORY_DB='./runtime/agent-memory.db' AGENT_STATE_DB='./runtime/agent-state.db' FLEET_LIBRARIAN_DB='./runtime/fleet-librarian.db' AGENT_MEMORY_BIN='agent-memory' fleet-librarian < /dev/null"
                 }
                 pane name="OPERATOR" focus=true command="bash" {
-                    args "-lc" "AGENT_MAIL_DB='./runtime/agent-mail.db' operator-harness"
+                    args "-lc" "AGENT_MAIL_DB='./runtime/agent-mail.db' operator-console"
                 }
             }
         }
@@ -40,18 +40,18 @@ layout {
         pane split_direction="horizontal" {
             pane split_direction="vertical" {
                 pane name="CLAUDE-API" command="bash" {
-                    args "-lc" "FLEET_CLAUDE_SOCKET='./runtime/claude.sock' fleet-claude < /dev/null"
+                    args "-lc" "INFERENCE_CLOUD_ANTHROPIC_SOCKET='./runtime/claude.sock' inference-cloud-anthropic < /dev/null"
                 }
                 pane name="GEMINI-API" command="bash" {
-                    args "-lc" "FLEET_GEMINI_SOCKET='./runtime/gemini.sock' fleet-gemini < /dev/null"
+                    args "-lc" "INFERENCE_CLOUD_GOOGLE_SOCKET='./runtime/gemini.sock' inference-cloud-google < /dev/null"
                 }
             }
             pane split_direction="vertical" {
                 pane name="OPENAI-API" command="bash" {
-                    args "-lc" "FLEET_OPENAI_SOCKET='./runtime/openai.sock' fleet-openai < /dev/null"
+                    args "-lc" "INFERENCE_CLOUD_OPENAI_SOCKET='./runtime/openai.sock' inference-cloud-openai < /dev/null"
                 }
                 pane name="OPENROUTER-API" command="bash" {
-                    args "-lc" "FLEET_OPENROUTER_SOCKET='./runtime/openrouter.sock' fleet-openrouter < /dev/null"
+                    args "-lc" "INFERENCE_CLOUD_OPENROUTER_SOCKET='./runtime/openrouter.sock' inference-cloud-openrouter < /dev/null"
                 }
             }
         }
@@ -61,18 +61,18 @@ layout {
         pane split_direction="horizontal" {
             pane split_direction="vertical" {
                 pane name="EMBED" command="bash" {
-                    args "-lc" "export LD_LIBRARY_PATH=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\"):./build/node_modules/onnxruntime-node/bin/napi-v6/linux/x64:${LD_LIBRARY_PATH}\" && FLEET_EMBED_SOCKET='./runtime/embed.sock' fleet-embed < /dev/null"
+                    args "-lc" "export LD_LIBRARY_PATH=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\"):./lib/onnxruntime/linux/x64:${LD_LIBRARY_PATH}\" && INFERENCE_LOCAL_EMBED_SOCKET='./runtime/embed.sock' inference-local-embed < /dev/null"
                 }
                 pane name="RERANK" command="bash" {
-                    args "-lc" "export LD_LIBRARY_PATH=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\"):./build/node_modules/onnxruntime-node/bin/napi-v6/linux/x64:${LD_LIBRARY_PATH}\" && FLEET_RERANK_SOCKET='./runtime/rerank.sock' fleet-rerank < /dev/null"
+                    args "-lc" "export LD_LIBRARY_PATH=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\"):./lib/onnxruntime/linux/x64:${LD_LIBRARY_PATH}\" && INFERENCE_LOCAL_RERANK_SOCKET='./runtime/rerank.sock' inference-local-rerank < /dev/null"
                 }
             }
             pane split_direction="vertical" {
                 pane name="LIGHT" command="bash" {
-                    args "-lc" "export LD_LIBRARY_PATH=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\"):./build/node_modules/onnxruntime-node/bin/napi-v6/linux/x64:${LD_LIBRARY_PATH}\" && FLEET_LIGHT_SOCKET='./runtime/light.sock' fleet-light < /dev/null"
+                    args "-lc" "export LD_LIBRARY_PATH=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\"):./lib/onnxruntime/linux/x64:${LD_LIBRARY_PATH}\" && INFERENCE_LOCAL_SMALL_SOCKET='./runtime/light.sock' inference-local-small < /dev/null"
                 }
                 pane name="HEAVY" command="bash" {
-                    args "-lc" "export LD_LIBRARY_PATH=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\"):./build/node_modules/onnxruntime-node/bin/napi-v6/linux/x64:${LD_LIBRARY_PATH}\" && FLEET_HEAVY_SOCKET='./runtime/heavy.sock' fleet-heavy < /dev/null"
+                    args "-lc" "export LD_LIBRARY_PATH=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\"):./lib/onnxruntime/linux/x64:${LD_LIBRARY_PATH}\" && INFERENCE_LOCAL_MEDIUM_SOCKET='./runtime/heavy.sock' inference-local-medium < /dev/null"
                 }
             }
         }

@@ -1,0 +1,10 @@
+id: mini-volition-4e34
+title: LLM-based Entity Consolidation
+seed: mini-volition-4e34
+status: active
+createdAt: "2026-04-15T20:40:55.310Z"
+updatedAt: "2026-04-17T10:23:40.350Z"
+objective: Implement the required components, add tests, and verify the changes.
+constraints:
+acceptance:
+references:

@@ -1,0 +1,12 @@
+id: mini-volition-0a40
+title: Hierarchical context propagation
+seed: mini-volition-0a40
+status: active
+createdAt: "2026-04-15T12:44:00.991Z"
+updatedAt: "2026-04-15T17:41:32.612Z"
+objective: "Implement hierarchical context propagation for memory artifacts. Every artifact (Working, Episodic, Archival) must be tagged with its lineage: project_id -> task_id -> turn_id. This allows the retrieval engine to filter or boost results based on contextual proximity (e.g., 'show me facts related to this current task first'), providing much more relevant RAG hits than simple content similarity."
+constraints:
+  - Context tags must be inherited automatically during turn execution.
+acceptance:
+  - Retrieval results for a 'fix bug' query are boosted if the artifact shares the same project_id as the active task.
+references:

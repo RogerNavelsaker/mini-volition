@@ -1,0 +1,12 @@
+id: mini-volition-354c
+title: Stronger governor
+seed: mini-volition-354c
+spec: mini-volition-354c
+status: active
+createdAt: "2026-04-15T12:43:15.166Z"
+updatedAt: "2026-04-15T12:43:15.166Z"
+summary: Implement advanced governance rules for resource management.
+steps:
+  - 1. Implement burst suppression logic and urgent override rules in the governor.
+  - 2. Add interrupt policy and work conservation rules.
+  - 3. Implement hibernation detection and resume logic.

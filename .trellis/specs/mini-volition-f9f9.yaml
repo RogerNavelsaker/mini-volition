@@ -1,0 +1,12 @@
+id: mini-volition-f9f9
+title: Diagnostic Deadman Switch
+seed: mini-volition-f9f9
+status: active
+createdAt: "2026-04-15T14:29:58.436Z"
+updatedAt: "2026-04-15T17:41:06.920Z"
+objective: "Implement a diagnostic 'AgentGhosted' recovery flow. If a turn exits via the deadman timer or an unhandled crash, the harness must record the 'ghosted' status in the agent state. Upon the next wake, the harness must inject a prominent '§ORIENTATION ! ALERT: AgentGhosted' block into the prompt, detailing exactly where the previous turn halted (based on the action journal)."
+constraints:
+  - Ghost detection must be separate from standard error logging.
+acceptance:
+  - Agent acknowledges the previous failure in its first reasoning block after a crash.
+references:

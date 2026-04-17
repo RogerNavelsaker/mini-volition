@@ -1,0 +1,12 @@
+id: mini-volition-645d
+title: Self-repair and dynamic topology
+seed: mini-volition-645d
+status: active
+createdAt: "2026-04-15T12:44:00.769Z"
+updatedAt: "2026-04-15T17:36:24.410Z"
+objective: Implement autonomous self-repair and dynamic topology. The harness must track consecutive turn failures for an agent. If a threshold is reached, the harness can autonomously 'reclaim' the failed task and assign it to a different agent profile or request an operator to add capacity. This ensures system resilience without human intervention for transient agent crashes.
+constraints:
+  - Repair attempts must be limited to prevent infinite retry loops.
+acceptance:
+  - Job 123 is automatically moved from Abe-01 (failing) to Abe-02 (idle) after 3 crashes.
+references:

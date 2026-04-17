@@ -1,0 +1,10 @@
+id: mini-volition-e3af
+title: Ghost Status State & Recording
+seed: mini-volition-e3af
+status: active
+createdAt: "2026-04-15T20:40:59.233Z"
+updatedAt: "2026-04-17T10:23:41.780Z"
+objective: Implement the required components, add tests, and verify the changes.
+constraints:
+acceptance:
+references:

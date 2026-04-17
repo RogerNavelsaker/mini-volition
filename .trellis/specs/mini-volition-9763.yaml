@@ -1,0 +1,12 @@
+id: mini-volition-9763
+title: Dynamic channel subscriptions
+seed: mini-volition-9763
+status: active
+createdAt: "2026-04-15T12:44:00.423Z"
+updatedAt: "2026-04-15T17:36:24.237Z"
+objective: Implement dynamic channel subscriptions for agents. Currently, all agents monitor all communication layers by default. This update will allow agents to 'subscribe' to specific project-related streams or 'unsubscribe' from noise layers. This reduces context pollution and prevents unnecessary wakes from irrelevant chatter.
+constraints:
+  - Subscriptions must persist in the agent-state database.
+acceptance:
+  - Agent Abe-01 only wakes for @mentions or messages on its 'subscribed' list.
+references:
