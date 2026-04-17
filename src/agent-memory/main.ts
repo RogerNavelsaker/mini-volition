@@ -6,6 +6,7 @@ import { relationForItemKinds, upsertMemoryLink, invalidateMemoryLinks, timeline
 import { deriveFacts, invalidateMemoryFacts, upsertMemoryFact } from "./facts";
 import { ensureSchema } from "./schema";
 import { atomicPromote, promotionStatus } from "./promote";
+import { applyLinkedBudget } from "./graph";
 import { appendMemoryArtifact, appendMemorySourceArtifact } from "../state-artifacts/lib";
 import type {
   ArtifactRow,
@@ -56,6 +57,7 @@ const staleAfterSeconds = Math.max(30, parseInt(process.env.FLEET_MEMORY_STALE_A
 const decayGraceDays = Math.max(0, parseInt(process.env.FLEET_MEMORY_DECAY_GRACE_DAYS || "7", 10) || 7);
 const decayFloor = Math.max(0, Math.min(1, parseFloat(process.env.FLEET_MEMORY_DECAY_FLOOR || "0.1") || 0.1));
 const rrfK = Math.max(1, parseInt(process.env.FLEET_MEMORY_RRF_K || "60", 10) || 60);
+const linkedBudgetChars = Math.max(200, parseInt(process.env.FLEET_BUDGET_LINKED_CHARS || "1800", 10) || 1800);
 
 function usage(): never {
   console.error("Usage: agent-memory <refresh|repair|reinforce|decay|rebalance|compact|lookup|invalidate|timeline|status|promote-status|rebuild|list|skill> ...");
@@ -1291,8 +1293,9 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
          AND linked_item.status = 'active'
        GROUP BY linked_index.id, links.relation, linked_item.content
        ORDER BY weight DESC, linked_index.id DESC
-       LIMIT ?`,
-    ).all(...topCompactionTraceIds, agentName, ...topCompactionTraceIds, Math.max(limit * 2, 4)) as LinkedLookupRow[];
+       LIMIT 20`,
+    ).all(...topCompactionTraceIds, agentName, ...topCompactionTraceIds) as LinkedLookupRow[];
+    linkedArchival = applyLinkedBudget(linkedArchival, linkedBudgetChars);
   }
   console.log(JSON.stringify({
     recentDigests: digests,
