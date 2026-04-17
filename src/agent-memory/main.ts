@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { createConnection } from "net";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
+import { computeNodeCentrality } from "./centrality";
 import { selectCompactionCandidates } from "./compaction";
 import { relationForItemKinds, upsertMemoryLink, invalidateMemoryLinks, timelineQueryTokens } from "./links";
 import { consolidateExtractedFacts, deriveFacts, invalidateMemoryFacts, upsertMemoryFact } from "./facts";
@@ -1153,19 +1154,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
     else if (index < 3) current.topBonus += 0.02;
     fused.set(row.id, current);
   });
-  for (const row of linkRows) {
-    if (fused.has(row.from_search_id)) {
-      const current = fused.get(row.to_search_id) ?? { score: 0, topBonus: 0 };
-      current.score += Math.max(0, row.weight) * 0.08;
-      fused.set(row.to_search_id, current);
-    }
-    if (fused.has(row.to_search_id)) {
-      const current = fused.get(row.from_search_id) ?? { score: 0, topBonus: 0 };
-      current.score += Math.max(0, row.weight) * 0.08;
-      fused.set(row.from_search_id, current);
-    }
-  }
-
+  const centralityBoosts = computeNodeCentrality(linkRows);
   const linkBoosts = new Map<number, number>();
   for (const row of linkRows) {
     if (fused.has(row.from_search_id)) {
@@ -1190,13 +1179,15 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
       const lexicalScore = overlapScore(query, row.content);
       const decayScore = row.decay_score ?? 1;
       const linkBoost = linkBoosts.get(row.id) ?? 0;
+      const centralityBoost = centralityBoosts.get(row.id) ?? 0;
       return {
         ...row,
         lexical_score: lexicalScore,
         fused_score: fusedScore?.score ?? 0,
         top_bonus: fusedScore?.topBonus ?? 0,
         link_boost: linkBoost,
-        score: (fusedScore?.score ?? 0) + (fusedScore?.topBonus ?? 0) + lexicalScore * 0.1 + (row.strength ?? 1) * 0.03 + decayScore * 0.1,
+        centrality_boost: centralityBoost,
+        score: (fusedScore?.score ?? 0) + (fusedScore?.topBonus ?? 0) + lexicalScore * 0.1 + centralityBoost * 0.12 + (row.strength ?? 1) * 0.03 + decayScore * 0.1,
       };
     })
     .filter((row) => row.score > 0)
@@ -1276,6 +1267,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
     top_bonus: Number((row.top_bonus ?? 0).toFixed(4)),
     lexical_score: Number((row.lexical_score ?? 0).toFixed(4)),
     link_boost: Number((row.link_boost ?? 0).toFixed(4)),
+    centrality_boost: Number((row.centrality_boost ?? 0).toFixed(4)),
     strength: Number((row.strength ?? 1).toFixed(4)),
     decay_score: Number((row.decay_score ?? 1).toFixed(4)),
   }));
@@ -1328,7 +1320,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
       ? "memory artifacts unavailable"
       : ranked.length === 0
       ? `memory artifacts available${stale ? " but stale" : ""}; ${mode} retrieval match empty`
-      : `memory artifacts available${stale ? " but stale" : ""}; ${mode} fts+vector+link retrieval`,
+      : `memory artifacts available${stale ? " but stale" : ""}; ${mode} fts+vector+link+centrality retrieval`,
     retrievalMode: mode,
     freshness: {
       stale,

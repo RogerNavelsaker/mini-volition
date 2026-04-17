@@ -32,6 +32,7 @@ export type ArtifactRow = {
   fused_score?: number;
   top_bonus?: number;
   link_boost?: number;
+  centrality_boost?: number;
 };
 
 export type RefreshStateRow = {
@@ -79,6 +80,7 @@ export type TraceRow = {
   top_bonus: number;
   lexical_score: number;
   link_boost: number;
+  centrality_boost: number;
   strength: number;
   decay_score: number;
 };
