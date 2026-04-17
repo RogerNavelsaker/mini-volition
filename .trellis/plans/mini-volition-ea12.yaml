@@ -2,8 +2,10 @@ id: mini-volition-ea12
 title: Mail Filter Integration
 seed: mini-volition-ea12
 spec: mini-volition-ea12
-status: active
+status: done
 createdAt: "2026-04-15T20:40:56.811Z"
-updatedAt: "2026-04-15T20:40:56.811Z"
+updatedAt: "2026-04-17T18:27:18.443Z"
+completedAt: "2026-04-17T18:27:18.442Z"
+completionSummary: "Integrated agent-mail with channel subscription state from agent-state. Public broadcasts now map to chat:general, public ad-hoc recipients map to their channel name, unsubscribed channels suppress burst selection until resume_at elapses, and direct/urgent mail still bypasses filtering. Added focused transport tests and validated with tests plus full build."
 summary: Plan to address Mail Filter Integration
 steps:
