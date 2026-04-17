@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifySourceGroup, turnProfileConfig } from "./policy";
+import { classifySourceGroup, retryConfig, turnProfileConfig } from "./policy";
 
 describe("turnProfileConfig", () => {
   test("uses global timeout as fallback for every profile", () => {
@@ -47,5 +47,38 @@ describe("classifySourceGroup", () => {
     expect(classifySourceGroup("mail_burst", "private")).toBe("direct");
     expect(classifySourceGroup("mail_burst", "public")).toBe("social");
     expect(classifySourceGroup("mail_burst", "unknown")).toBe("ambient");
+  });
+});
+
+describe("retryConfig", () => {
+  test("light: 2 attempts, 1000ms base, 1.5x multiplier", () => {
+    const cfg = retryConfig("light");
+    expect(cfg.maxAttempts).toBe(2);
+    expect(cfg.backoffMs).toBe(1_000);
+    expect(cfg.backoffMultiplier).toBe(1.5);
+  });
+
+  test("full: 3 attempts, 2000ms base, 2x multiplier", () => {
+    const cfg = retryConfig("full");
+    expect(cfg.maxAttempts).toBe(3);
+    expect(cfg.backoffMs).toBe(2_000);
+    expect(cfg.backoffMultiplier).toBe(2.0);
+  });
+
+  test("max: 4 attempts, 3000ms base, 2x multiplier", () => {
+    const cfg = retryConfig("max");
+    expect(cfg.maxAttempts).toBe(4);
+    expect(cfg.backoffMs).toBe(3_000);
+    expect(cfg.backoffMultiplier).toBe(2.0);
+  });
+
+  test("attempt counts strictly increase: light < full < max", () => {
+    expect(retryConfig("light").maxAttempts).toBeLessThan(retryConfig("full").maxAttempts);
+    expect(retryConfig("full").maxAttempts).toBeLessThan(retryConfig("max").maxAttempts);
+  });
+
+  test("backoff increases with profile weight", () => {
+    expect(retryConfig("light").backoffMs).toBeLessThan(retryConfig("full").backoffMs);
+    expect(retryConfig("full").backoffMs).toBeLessThan(retryConfig("max").backoffMs);
   });
 });

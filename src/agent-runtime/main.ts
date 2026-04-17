@@ -7,7 +7,7 @@ import { createConnection } from "net";
 import { join, dirname } from "path";
 import { ensureSchema as ensureMemorySchema } from "../agent-memory/schema";
 import { appendMemorySourceArtifact } from "../state-artifacts/lib";
-import { chooseRetrievalMode, chooseTurnProfile, classifySourceGroup, turnProfileConfig, type RetrievalMode, type TurnProfile, type WakeSource, type WakeSourceGroup } from "./policy";
+import { chooseRetrievalMode, chooseTurnProfile, classifySourceGroup, retryConfig, turnProfileConfig, type RetrievalMode, type TurnProfile, type WakeSource, type WakeSourceGroup } from "./policy";
 import { ensureTurnJournal, recoverInterruptedTurns, replayPolicyForAction, type TurnCheckpoint, type TurnPhase } from "./recovery";
 
 const name = process.env.AGENT_NAME;
@@ -1187,6 +1187,26 @@ function requestProviderTurn(
   });
 }
 
+async function withProviderRetry(
+  profile: TurnProfile,
+  fn: () => Promise<ProviderTurnResponse>,
+): Promise<ProviderTurnResponse> {
+  const cfg = retryConfig(profile);
+  let lastResponse: ProviderTurnResponse | null = null;
+  let backoff = cfg.backoffMs;
+  for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    const response = await fn();
+    if (response.stop_reason !== "error" && response.stop_reason !== "rate_limited") return response;
+    lastResponse = response;
+    if (attempt < cfg.maxAttempts) {
+      recordWorking("system", `Provider retry ${attempt}/${cfg.maxAttempts} profile=${profile} reason=${response.error ?? response.stop_reason} backoff=${backoff}ms`);
+      await new Promise((resolve) => setTimeout(resolve, backoff));
+      backoff = Math.round(backoff * cfg.backoffMultiplier);
+    }
+  }
+  return lastResponse!;
+}
+
 async function chooseTurnExecutionProfile(source: WakeSource, burst: IncomingBurst): Promise<TurnExecutionProfile> {
   const fallbackProfile = chooseTurnProfile(source, burst);
   const modelChoice = await requestInferenceTurnProfile(source, burst);
@@ -1747,14 +1767,17 @@ async function processWakeEvent(
       if (!turnModel) {
       diagnosticBuffer += "No model specified (INFERENCE_CLOUD_MODEL or execution profile model required)\n";
       }
-      const turnResponse = await requestProviderTurn(
-        providerSocket,
-        turnModel,
-        renderSystemPrompt(name, burst),
-        promptText,
-        parseInt(process.env.FLEET_OUTPUT_BUDGET || "8192", 10),
-        executionProfile.profile === "light" ? 0.3 : 1.0,
-        executionProfile.timeout_ms,
+      const turnResponse = await withProviderRetry(
+        executionProfile.profile,
+        () => requestProviderTurn(
+          providerSocket,
+          turnModel,
+          renderSystemPrompt(name, burst),
+          promptText,
+          parseInt(process.env.FLEET_OUTPUT_BUDGET || "8192", 10),
+          executionProfile.profile === "light" ? 0.3 : 1.0,
+          executionProfile.timeout_ms,
+        ),
       );
       responseText = turnResponse.content;
       if (turnResponse.error) {
