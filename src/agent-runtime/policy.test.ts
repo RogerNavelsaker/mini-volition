@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifySourceGroup, cooldownRange, randomizedCooldownMs, retryConfig, turnProfileConfig } from "./policy";
+import { classifySourceGroup, cooldownRange, randomizedCooldownMs, refractoryCooldownMs, retryConfig, turnProfileConfig, wakeClassFor } from "./policy";
 
 describe("turnProfileConfig", () => {
   test("uses global timeout as fallback for every profile", () => {
@@ -108,5 +108,30 @@ describe("randomizedCooldownMs", () => {
   test("clamps invalid random samples into the supported range", () => {
     expect(randomizedCooldownMs("transient_capacity", () => -1)).toBe(10_000);
     expect(randomizedCooldownMs("transient_capacity", () => 2)).toBe(30_000);
+  });
+});
+
+describe("refractoryCooldownMs", () => {
+  test("samples a 10-30 second refractory window", () => {
+    expect(refractoryCooldownMs(() => 0)).toBe(10_000);
+    expect(refractoryCooldownMs(() => 0.5)).toBe(20_000);
+    expect(refractoryCooldownMs(() => 1)).toBe(30_000);
+  });
+});
+
+describe("wakeClassFor", () => {
+  test("keeps internal jobs in the refractory class regardless of urgency hints", () => {
+    expect(wakeClassFor("internal_job", "internal")).toBe("refractory");
+    expect(wakeClassFor("internal_job", "urgent")).toBe("refractory");
+  });
+
+  test("lets direct and urgent mail bypass the refractory window", () => {
+    expect(wakeClassFor("mail_burst", "private")).toBe("hot");
+    expect(wakeClassFor("mail_burst", "urgent")).toBe("hot");
+  });
+
+  test("keeps public and ambient mail in the refractory class", () => {
+    expect(wakeClassFor("mail_burst", "public")).toBe("refractory");
+    expect(wakeClassFor("mail_burst", "unknown")).toBe("refractory");
   });
 });

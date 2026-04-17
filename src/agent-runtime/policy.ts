@@ -17,6 +17,7 @@ export type CooldownRange = {
   minMs: number;
   maxMs: number;
 };
+export type WakeClass = "hot" | "refractory";
 export type RetrievalPolicyBurst = {
   primary: { layer: string };
   messages: Array<{ body: string }>;
@@ -130,4 +131,20 @@ export function randomizedCooldownMs(
 
   const sample = Math.min(1, Math.max(0, random()));
   return minMs + Math.round((maxMs - minMs) * sample);
+}
+
+export function refractoryCooldownMs(random: () => number = Math.random): number {
+  const sample = Math.min(1, Math.max(0, random()));
+  return 10_000 + Math.round(20_000 * sample);
+}
+
+export function wakeClassFor(
+  source: WakeSource,
+  primaryLayer: string,
+): WakeClass {
+  if (source === "internal_job") return "refractory";
+
+  const layer = primaryLayer.toLowerCase();
+  if (layer === "urgent" || layer === "private") return "hot";
+  return "refractory";
 }

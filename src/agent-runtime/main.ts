@@ -7,7 +7,7 @@ import { createConnection } from "net";
 import { join, dirname } from "path";
 import { ensureSchema as ensureMemorySchema } from "../agent-memory/schema";
 import { appendMemorySourceArtifact } from "../state-artifacts/lib";
-import { chooseRetrievalMode, chooseTurnProfile, classifySourceGroup, randomizedCooldownMs, retryConfig, turnProfileConfig, type RetrievalMode, type TurnProfile, type WakeSource, type WakeSourceGroup } from "./policy";
+import { chooseRetrievalMode, chooseTurnProfile, classifySourceGroup, randomizedCooldownMs, refractoryCooldownMs, retryConfig, turnProfileConfig, wakeClassFor as schedulerWakeClassFor, type RetrievalMode, type TurnProfile, type WakeClass, type WakeSource, type WakeSourceGroup } from "./policy";
 import { ensureTurnJournal, recoverInterruptedTurns, replayPolicyForAction, type TurnCheckpoint, type TurnPhase } from "./recovery";
 
 const name = process.env.AGENT_NAME;
@@ -358,7 +358,6 @@ type InternalJob = {
   created_at: string;
   updated_at: string;
 };
-type WakeClass = "hot" | "workload";
 type WakeEvent = {
   source: WakeSource;
   sourceGroup: WakeSourceGroup;
@@ -1303,11 +1302,10 @@ function internalJobPriority(priority?: JobPriority): number {
   return 50;
 }
 
-function wakeClassFor(source: WakeSource, burst: IncomingBurst, jobPriority?: JobPriority): WakeClass {
-  if (source === "internal_job") {
-    return jobPriority === "urgent" || jobPriority === "high" ? "hot" : "workload";
-  }
-  return burst.primary.layer.toLowerCase() === "urgent" ? "hot" : "workload";
+const refractoryCooldowns = new Map<WakeSourceGroup, number>();
+
+function wakeClassFor(source: WakeSource, burst: IncomingBurst, _jobPriority?: JobPriority): WakeClass {
+  return schedulerWakeClassFor(source, burst.primary.layer);
 }
 
 function wakePriorityFor(source: WakeSource, burst: IncomingBurst, jobPriority?: JobPriority): number {
@@ -1325,9 +1323,42 @@ function wakeSourceGroupFor(source: WakeSource, burst: IncomingBurst): WakeSourc
   return classifySourceGroup(source, burst.primary.layer);
 }
 
+function activeRefractoryDeadline(sourceGroup: WakeSourceGroup, now = Date.now()): number | null {
+  const deadline = refractoryCooldowns.get(sourceGroup);
+  if (!deadline) return null;
+  if (deadline <= now) {
+    refractoryCooldowns.delete(sourceGroup);
+    return null;
+  }
+  return deadline;
+}
+
+function isRefractoryCoolingDown(sourceGroup: WakeSourceGroup, now = Date.now()): boolean {
+  return activeRefractoryDeadline(sourceGroup, now) !== null;
+}
+
+function applyRefractoryCooldown(sourceGroup: WakeSourceGroup, now = Date.now()): string {
+  const deadline = now + refractoryCooldownMs();
+  refractoryCooldowns.set(sourceGroup, deadline);
+  return new Date(deadline).toISOString();
+}
+
+function nextRefractoryCooldownDelay(now = Date.now()): number | null {
+  let nextDeadline: number | null = null;
+  for (const sourceGroup of refractoryCooldowns.keys()) {
+    const deadline = activeRefractoryDeadline(sourceGroup, now);
+    if (deadline === null) continue;
+    if (nextDeadline === null || deadline < nextDeadline) {
+      nextDeadline = deadline;
+    }
+  }
+  return nextDeadline === null ? null : Math.max(0, nextDeadline - now);
+}
+
 async function selectNextWake(options?: { allowWorkload?: boolean; blockingMail?: boolean }): Promise<WakeEvent | null> {
   const allowWorkload = options?.allowWorkload ?? true;
   const blockingMail = options?.blockingMail ?? true;
+  const now = Date.now();
   reclaimStaleInternalJobs();
   reclaimStaleMailClaims();
   const queuedJob = peekInternalJob();
@@ -1349,8 +1380,18 @@ async function selectNextWake(options?: { allowWorkload?: boolean; blockingMail?
     : null;
   const jobWakeClass = queuedJobBurst ? wakeClassFor("internal_job", queuedJobBurst, queuedJob.priority) : null;
   const mailWakeClass = mailBurst ? wakeClassFor("mail_burst", mailBurst) : null;
-  const eligibleJobBurst = queuedJobBurst && (allowWorkload || jobWakeClass === "hot") ? queuedJobBurst : null;
-  const eligibleMailBurst = mailBurst && (allowWorkload || mailWakeClass === "hot") ? mailBurst : null;
+  const jobSourceGroup = queuedJobBurst ? wakeSourceGroupFor("internal_job", queuedJobBurst) : null;
+  const mailSourceGroup = mailBurst ? wakeSourceGroupFor("mail_burst", mailBurst) : null;
+  const eligibleJobBurst = queuedJobBurst
+    && (allowWorkload || jobWakeClass === "hot")
+    && (jobWakeClass === "hot" || !isRefractoryCoolingDown(jobSourceGroup!, now))
+      ? queuedJobBurst
+      : null;
+  const eligibleMailBurst = mailBurst
+    && (allowWorkload || mailWakeClass === "hot")
+    && (mailWakeClass === "hot" || !isRefractoryCoolingDown(mailSourceGroup!, now))
+      ? mailBurst
+      : null;
   const mailPriority = eligibleMailBurst ? wakePriorityFor("mail_burst", eligibleMailBurst) : -1;
   const jobPriority = eligibleJobBurst && queuedJob ? wakePriorityFor("internal_job", eligibleJobBurst, queuedJob.priority) : -1;
 
@@ -1360,7 +1401,7 @@ async function selectNextWake(options?: { allowWorkload?: boolean; blockingMail?
     const createdAt = claimedJob.created_at.endsWith("Z") ? claimedJob.created_at : `${claimedJob.created_at}Z`;
     return {
       source: "internal_job",
-      sourceGroup: wakeSourceGroupFor("internal_job", eligibleJobBurst),
+      sourceGroup: jobSourceGroup!,
       wakeReason: `job:${claimedJob.id}`,
       priority: jobPriority,
       wakeClass: wakeClassFor("internal_job", eligibleJobBurst, claimedJob.priority),
@@ -1394,7 +1435,7 @@ async function selectNextWake(options?: { allowWorkload?: boolean; blockingMail?
     if (!claimedMailBurst) return selectNextWake();
     return {
       source: "mail_burst",
-      sourceGroup: wakeSourceGroupFor("mail_burst", claimedMailBurst),
+      sourceGroup: mailSourceGroup!,
       wakeReason: `mail:${claimedMailBurst.primary.layer}:${claimedMailBurst.primary.id}`,
       priority: mailPriority,
       wakeClass: wakeClassFor("mail_burst", claimedMailBurst),
@@ -1404,16 +1445,29 @@ async function selectNextWake(options?: { allowWorkload?: boolean; blockingMail?
 
   if (!blockingMail) return null;
 
+  const refractoryDelayMs = nextRefractoryCooldownDelay(now);
+  if (refractoryDelayMs !== null && refractoryDelayMs > 0) {
+    const cooldownUntil = new Date(now + refractoryDelayMs).toISOString();
+    setRuntimeState("cooldown", "refractory_window", "scheduler", null, cooldownUntil);
+    await new Promise((resolve) => setTimeout(resolve, Math.min(refractoryDelayMs, 1000)));
+    return null;
+  }
+
   setRuntimeState("idle", "awaiting_message", "mail_listen");
   const blockingMailBurst = await waitForMailBurst();
   if (!blockingMailBurst) return null;
+  const blockingWakeClass = wakeClassFor("mail_burst", blockingMailBurst);
+  const blockingSourceGroup = wakeSourceGroupFor("mail_burst", blockingMailBurst);
+  if (blockingWakeClass !== "hot" && isRefractoryCoolingDown(blockingSourceGroup)) {
+    return null;
+  }
 
   return {
     source: "mail_burst",
-    sourceGroup: wakeSourceGroupFor("mail_burst", blockingMailBurst),
+    sourceGroup: blockingSourceGroup,
     wakeReason: `mail:${blockingMailBurst.primary.layer}:${blockingMailBurst.primary.id}`,
     priority: wakePriorityFor("mail_burst", blockingMailBurst),
-    wakeClass: wakeClassFor("mail_burst", blockingMailBurst),
+    wakeClass: blockingWakeClass,
     burst: blockingMailBurst,
   };
 }
@@ -2346,6 +2400,10 @@ async function runWorker() {
     const wake = await selectNextWake();
     if (!wake) continue;
     await processWakeEvent(wake);
+    if (wake.wakeClass === "refractory") {
+      const cooldownUntil = applyRefractoryCooldown(wake.sourceGroup);
+      setRuntimeState("cooldown", "refractory_window", wake.wakeReason, null, cooldownUntil);
+    }
   }
 }
 
