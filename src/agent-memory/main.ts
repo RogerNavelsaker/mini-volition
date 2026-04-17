@@ -57,7 +57,7 @@ const decayFloor = Math.max(0, Math.min(1, parseFloat(process.env.FLEET_MEMORY_D
 const rrfK = Math.max(1, parseInt(process.env.FLEET_MEMORY_RRF_K || "60", 10) || 60);
 
 function usage(): never {
-  console.error("Usage: agent-memory <refresh|repair|reinforce|decay|rebalance|compact|lookup|invalidate|timeline|status|rebuild|list|skill> ...");
+  console.error("Usage: agent-memory <refresh|repair|reinforce|decay|rebalance|compact|lookup|invalidate|timeline|status|rebuild|verify|list|push-verbatim|skill> ...");
   process.exit(64);
 }
 
@@ -1778,7 +1778,7 @@ function verifyMemory(agentName?: string) {
   }));
 }
 
-ensureSchema();
+ensureSchema(db);
 
 if (cmd === "refresh") {
   if (!arg1) {
@@ -1865,6 +1865,12 @@ if (cmd === "refresh") {
   } else {
     console.log(JSON.stringify(db.prepare("SELECT * FROM agent_memory_artifacts ORDER BY id DESC LIMIT ?").all(limit)));
   }
+} else if (cmd === "push-verbatim") {
+  if (!arg1 || !arg2 || !Bun.argv[5]) {
+    console.error("Usage: agent-memory push-verbatim <agent> <source> <content>");
+    process.exit(64);
+  }
+  db.prepare("INSERT INTO tier0_verbatim (agent_name, source, content) VALUES (?, ?, ?)").run(arg1, arg2, Bun.argv[5]);
 } else {
   usage();
 }

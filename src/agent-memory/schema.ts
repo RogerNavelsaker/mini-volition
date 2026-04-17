@@ -4,6 +4,13 @@ export function ensureSchema(db: Database) {
   db.exec("PRAGMA busy_timeout = 5000;");
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA synchronous = NORMAL;");
+  db.run(`CREATE TABLE IF NOT EXISTS tier0_verbatim (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_name TEXT,
+    source TEXT,
+    content TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
   db.run(`CREATE TABLE IF NOT EXISTS tier1_working (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_name TEXT,
