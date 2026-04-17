@@ -2,8 +2,10 @@ id: mini-volition-9207
 title: Burst Flushed Event Signal
 seed: mini-volition-9207
 spec: mini-volition-9207
-status: active
+status: done
 createdAt: "2026-04-15T20:40:58.930Z"
-updatedAt: "2026-04-15T20:40:58.930Z"
+updatedAt: "2026-04-17T19:38:47.598Z"
+completedAt: "2026-04-17T19:38:47.596Z"
+completionSummary: emit burst_flushed event to fleet_event_log after completeMailBurst; test added
 summary: Plan to address Burst Flushed Event Signal
 steps:
