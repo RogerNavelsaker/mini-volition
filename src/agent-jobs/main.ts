@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { addJobDependency, ensureJobSchema, nextQueuedJob, normalizePriority, pendingBlockers, PRIORITIES, reclaimStaleClaims, unblockDependents } from "./core";
+import { addJobDependency, cascadeCancel, ensureJobSchema, jobDeps, manualUnblock, nextQueuedJob, normalizePriority, pendingBlockers, PRIORITIES, reclaimStaleClaims, unblockDependents } from "./core";
 import { appendJobArtifact } from "../state-artifacts/lib";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
@@ -31,7 +31,7 @@ const [, , cmd, arg1, arg2, arg3, arg4] = Bun.argv;
 const arg5 = Bun.argv[6];
 
 function usage(): never {
-  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|depend|reclaim-stale|rebuild|verify|list|skill> ...");
+  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|depend|cascade-cancel|unblock-job|deps|reclaim-stale|rebuild|verify|list|skill> ...");
   process.exit(64);
 }
 
@@ -452,6 +452,36 @@ if (cmd === "queue") {
     job: dep,
   });
   console.log(JSON.stringify({ dependent_job_id: depJobId, blocking_job_id: blockJobId, job: dep }));
+} else if (cmd === "cascade-cancel") {
+  if (!arg1 || !arg2) {
+    console.error("Usage: agent-jobs cascade-cancel <jobId> <agent> [reason]");
+    process.exit(64);
+  }
+  const reason = arg3 ?? "cascade cancelled";
+  const cancelled = cascadeCancel(db, Number(arg1), reason);
+  for (const id of cancelled) {
+    const job = db.prepare("SELECT * FROM fleet_internal_jobs WHERE id = ?").get(id) as any;
+    appendJobArtifact(arg2, { record_type: "job", event: "cancelled", job, cascade_root: Number(arg1) });
+  }
+  console.log(JSON.stringify({ cascade_root: Number(arg1), cancelled_ids: cancelled }));
+} else if (cmd === "unblock-job") {
+  if (!arg1 || !arg2) {
+    console.error("Usage: agent-jobs unblock-job <jobId> <agent>");
+    process.exit(64);
+  }
+  const changed = manualUnblock(db, Number(arg1));
+  const job = db.prepare("SELECT * FROM fleet_internal_jobs WHERE id = ?").get(Number(arg1)) as any;
+  if (changed) {
+    appendJobArtifact(arg2, { record_type: "job", event: "unblocked", job, manual: true });
+  }
+  console.log(JSON.stringify({ job_id: Number(arg1), unblocked: changed, job }));
+} else if (cmd === "deps") {
+  if (!arg1) {
+    console.error("Usage: agent-jobs deps <jobId>");
+    process.exit(64);
+  }
+  const deps = jobDeps(db, Number(arg1));
+  console.log(JSON.stringify({ job_id: Number(arg1), ...deps }));
 } else if (cmd === "reclaim-stale") {
   if (!arg1) {
     console.error("Usage: agent-jobs reclaim-stale <agent> [ttlMs]");
