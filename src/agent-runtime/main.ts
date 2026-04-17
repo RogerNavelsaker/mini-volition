@@ -7,7 +7,7 @@ import { createConnection } from "net";
 import { join, dirname } from "path";
 import { ensureSchema as ensureMemorySchema } from "../agent-memory/schema";
 import { appendMemorySourceArtifact } from "../state-artifacts/lib";
-import { chooseRetrievalMode, chooseTurnProfile, type RetrievalMode, type TurnProfile } from "./policy";
+import { chooseRetrievalMode, chooseTurnProfile, turnProfileConfig, type RetrievalMode, type TurnProfile } from "./policy";
 import { ensureTurnJournal, recoverInterruptedTurns, replayPolicyForAction, type TurnCheckpoint, type TurnPhase } from "./recovery";
 
 const name = process.env.AGENT_NAME;
@@ -23,7 +23,6 @@ const mailClaimTtlMs = Math.max(30_000, parseInt(process.env.FLEET_MAIL_CLAIM_TT
 const jobsBin = process.env.AGENT_JOBS_BIN || "agent-jobs";
 const jobClaimTtlMs = Math.max(30_000, parseInt(process.env.FLEET_JOB_CLAIM_TTL_MS || "300000", 10) || 300000);
 const turnStaleMs = Math.max(30_000, parseInt(process.env.FLEET_TURN_STALE_MS || "300000", 10) || 300000);
-const turnTimeoutMs = Math.max(15_000, parseInt(process.env.FLEET_TURN_TIMEOUT_MS || "120000", 10) || 120000);
 const memoryBin = process.env.AGENT_MEMORY_BIN || "agent-memory";
 const embedSocket = process.env.INFERENCE_LOCAL_EMBED_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/embed.sock");
 const lightSocket = process.env.INFERENCE_LOCAL_SMALL_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/light.sock");
@@ -278,6 +277,7 @@ type TurnExecutionProfile = {
   profile: TurnProfile;
   model: string | null;
   reasoning_effort: string | null;
+  timeout_ms: number;
   source: "model" | "deterministic" | "rerun";
   reason: string;
 };
@@ -1049,25 +1049,6 @@ async function chooseRetrievalModeWithInference(source: WakeSource, burst: Incom
   return scored[0]?.mode ?? fallback;
 }
 
-function profileConfig(profile: TurnProfile): { model: string | null; reasoning_effort: string | null } {
-  if (profile === "light") {
-    return {
-        model: process.env.INFERENCE_LOCAL_SMALL_MODEL ?? null,
-        reasoning_effort: process.env.INFERENCE_LOCAL_SMALL_REASONING_EFFORT ?? "low",
-    };
-  }
-  if (profile === "max") {
-    return {
-      model: process.env.FLEET_MAX_MODEL ?? null,
-      reasoning_effort: process.env.FLEET_MAX_REASONING_EFFORT ?? "high",
-    };
-  }
-  return {
-    model: process.env.FLEET_FULL_MODEL ?? null,
-    reasoning_effort: process.env.FLEET_FULL_REASONING_EFFORT ?? "medium",
-  };
-}
-
 function requestInferenceTurnProfile(source: WakeSource, burst: IncomingBurst): Promise<TurnProfile | null> {
   return new Promise((resolve) => {
     const socket = createConnection(lightSocket);
@@ -1210,11 +1191,12 @@ async function chooseTurnExecutionProfile(source: WakeSource, burst: IncomingBur
   const fallbackProfile = chooseTurnProfile(source, burst);
   const modelChoice = await requestInferenceTurnProfile(source, burst);
   const chosen = modelChoice ?? fallbackProfile;
-  const config = profileConfig(chosen);
+  const config = turnProfileConfig(chosen);
   return {
     profile: chosen,
     model: config.model,
     reasoning_effort: config.reasoning_effort,
+    timeout_ms: config.timeout_ms,
     source: modelChoice ? "model" : "deterministic",
     reason: modelChoice ? "local model classified turn profile" : "wake/layer heuristic classified turn profile",
   };
@@ -1697,9 +1679,9 @@ async function processWakeEvent(
   try {
     const turn = await assembleTurnContext(name, burst, wake.source);
     const executionProfile = forceFullProfile
-      ? { profile: "full" as TurnProfile, model: process.env.FLEET_FULL_MODEL ?? null, reasoning_effort: process.env.FLEET_FULL_REASONING_EFFORT ?? "medium", source: "rerun" as const, reason: "forced full re-run after light turn escalation" }
+      ? { profile: "full" as TurnProfile, ...turnProfileConfig("full"), source: "rerun" as const, reason: "forced full re-run after light turn escalation" }
       : await chooseTurnExecutionProfile(wake.source, burst);
-    recordWorking("system", `Turn profile: ${executionProfile.profile} source=${executionProfile.source} model=${executionProfile.model ?? "default"} effort=${executionProfile.reasoning_effort ?? "default"}`);
+    recordWorking("system", `Turn profile: ${executionProfile.profile} source=${executionProfile.source} model=${executionProfile.model ?? "default"} effort=${executionProfile.reasoning_effort ?? "default"} timeout=${executionProfile.timeout_ms}ms`);
     reinforceMemoryAsync(name, turn.recalledArtifactIds);
     const promptText = renderTurnPrompt(name, burst, turn);
     checkpointPromptHash = promptHash(promptText);
@@ -1765,7 +1747,7 @@ async function processWakeEvent(
         promptText,
         parseInt(process.env.FLEET_OUTPUT_BUDGET || "8192", 10),
         executionProfile.profile === "light" ? 0.3 : 1.0,
-        turnTimeoutMs,
+        executionProfile.timeout_ms,
       );
       responseText = turnResponse.content;
       if (turnResponse.error) {
@@ -1803,11 +1785,11 @@ async function processWakeEvent(
 
       const deadmanTimer = setTimeout(() => {
         deadmanTriggered = true;
-        deadmanReason = `turn timed out after ${turnTimeoutMs}ms`;
+        deadmanReason = `turn timed out after ${executionProfile.timeout_ms}ms`;
         diagnosticBuffer += `[DEADMAN] ${deadmanReason}\n`;
         resolvePendingAcpError(deadmanReason);
         try { agent.kill(); } catch {}
-      }, turnTimeoutMs);
+      }, executionProfile.timeout_ms);
 
       const triggerLiveLimit = () => {
         if (liveLimitTriggered) return;
