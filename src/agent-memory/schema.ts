@@ -50,6 +50,7 @@ export function ensureSchema(db: Database) {
     last_recalled_at DATETIME,
     decay_score REAL NOT NULL DEFAULT 1.0,
     status TEXT NOT NULL DEFAULT 'active',
+    promoted_compaction_id INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(source_table, source_id)

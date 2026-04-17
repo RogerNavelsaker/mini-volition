@@ -5,6 +5,7 @@ import { join, resolve } from "path";
 import { relationForItemKinds, upsertMemoryLink, invalidateMemoryLinks, timelineQueryTokens } from "./links";
 import { deriveFacts, invalidateMemoryFacts, upsertMemoryFact } from "./facts";
 import { ensureSchema } from "./schema";
+import { atomicPromote, promotionStatus } from "./promote";
 import { appendMemoryArtifact, appendMemorySourceArtifact } from "../state-artifacts/lib";
 import type {
   ArtifactRow,
@@ -57,7 +58,7 @@ const decayFloor = Math.max(0, Math.min(1, parseFloat(process.env.FLEET_MEMORY_D
 const rrfK = Math.max(1, parseInt(process.env.FLEET_MEMORY_RRF_K || "60", 10) || 60);
 
 function usage(): never {
-  console.error("Usage: agent-memory <refresh|repair|reinforce|decay|rebalance|compact|lookup|invalidate|timeline|status|rebuild|list|skill> ...");
+  console.error("Usage: agent-memory <refresh|repair|reinforce|decay|rebalance|compact|lookup|invalidate|timeline|status|promote-status|rebuild|list|skill> ...");
   process.exit(64);
 }
 
@@ -817,33 +818,6 @@ async function compact(agentName: string) {
     open_risks: compacted.open_risks,
   });
   const taskId = `memory-compact:${signature}`;
-  db.run(
-    `INSERT INTO tier3_archival (agent_name, task_id, result, reflection, timestamp)
-     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-    [agentName, taskId, structured, archivalSummary],
-  );
-  appendMemorySourceArtifact("archival", agentName, {
-    record_type: "tier3_archival",
-    agent_name: agentName,
-    task_id: taskId,
-    result: structured,
-    reflection: archivalSummary,
-  });
-  db.run(
-    `INSERT INTO agent_memory_compactions (agent_name, source_artifact_ids, signature, summary, structured_json, source)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [agentName, selected.map((row) => row.id).join(","), signature, archivalSummary, structured, compacted.source],
-  );
-  const compactionId = db.prepare(
-    "SELECT id FROM agent_memory_compactions WHERE agent_name = ? AND signature = ?",
-  ).get(agentName, signature) as { id: number } | null;
-  if (compactionId?.id) {
-    appendMemoryArtifact(agentName, {
-      record_type: "compaction",
-      event: "created",
-      compaction: snapshotCompaction(compactionId.id),
-    });
-  }
   const itemSpecs = [
     ...compacted.lessons.map((content) => ({ kind: "lesson", content })),
     ...compacted.facts.map((content) => ({ kind: "fact", content })),
@@ -851,62 +825,64 @@ async function compact(agentName: string) {
     ...compacted.patterns.map((content) => ({ kind: "pattern", content })),
     ...compacted.open_risks.map((content) => ({ kind: "open_risk", content })),
   ];
-  if (compactionId?.id && itemSpecs.length) {
-    const embed = await requestEmbed(itemSpecs.map((item) => item.content.slice(0, 300)));
-    const createdItems: Array<{ id: number; item_kind: string; content: string }> = [];
-    for (const [index, item] of itemSpecs.entries()) {
-      db.run(
-        `INSERT INTO agent_memory_compaction_items
-         (compaction_id, agent_name, item_kind, content, strength, recall_count, decay_score, status, updated_at)
-         VALUES (?, ?, ?, ?, 1.0, 0, 1.0, 'active', CURRENT_TIMESTAMP)`,
-        [compactionId.id, agentName, item.kind, item.content],
-      );
-      const itemId = db.prepare("SELECT id FROM agent_memory_compaction_items WHERE compaction_id = ? ORDER BY id DESC LIMIT 1").get(compactionId.id) as { id: number } | null;
-      if (itemId?.id) {
-        upsertSearchIndex("compaction_item", itemId.id, agentName, "archival", `${item.kind}: ${item.content}`, embed.embeddings[index] ?? []);
-        createdItems.push({ id: itemId.id, item_kind: item.kind, content: item.content });
-        appendMemoryArtifact(agentName, {
-          record_type: "compaction_item",
-          event: "created",
-          item: snapshotCompactionItem(itemId.id),
-        });
-      }
+
+  // Collect all async data before writing to DB
+  const embed = itemSpecs.length > 0 ? await requestEmbed(itemSpecs.map((item) => item.content.slice(0, 300))) : { embeddings: [] as number[][] };
+  const items = itemSpecs.map((spec, i) => ({ kind: spec.kind, content: spec.content, embedding: embed.embeddings[i] ?? [] }));
+
+  // Pre-compute cross-item link pairs and embed their evidence
+  const itemPairs: Array<{ fromIdx: number; toIdx: number; relation: string; evidenceText: string }> = [];
+  for (let fi = 0; fi < items.length; fi++) {
+    for (let ti = 0; ti < items.length; ti++) {
+      if (fi === ti) continue;
+      const relation = relationForItemKinds(items[fi].kind, items[ti].kind);
+      itemPairs.push({ fromIdx: fi, toIdx: ti, relation, evidenceText: `${relation}: ${items[fi].content.slice(0, 200)} → ${items[ti].content.slice(0, 200)}` });
     }
-    // Embed link evidence and upsert links into search index for semantic link discovery
-    const linkEvidences: Array<{ fromId: number; toId: number; relation: string; evidence: string }> = [];
-    for (const from of createdItems) {
-      for (const to of createdItems) {
-        if (from.id === to.id) continue;
-        const relation = relationForItemKinds(from.item_kind, to.item_kind);
-        const evidence = `compaction:${compactionId.id}`;
-        upsertMemoryLink(db, agentName, from.id, to.id, relation, 0.65, evidence);
-        const linkRow = db.prepare(
-          `SELECT id FROM agent_memory_links WHERE from_item_id = ? AND to_item_id = ? AND relation = ?`,
-        ).get(from.id, to.id, relation) as { id: number } | null;
-        if (linkRow?.id) {
-          linkEvidences.push({ fromId: from.id, toId: to.id, relation, evidence: `${relation}: ${from.content.slice(0, 200)} → ${to.content.slice(0, 200)}` });
-          appendMemoryArtifact(agentName, {
-            record_type: "link",
-            event: "upsert",
-            link: snapshotLink(linkRow.id),
-          });
-        }
-      }
-    }
-    // Batch-embed link evidence for semantic link retrieval
-    if (linkEvidences.length > 0) {
-      try {
-        const linkEmbed = await requestEmbed(linkEvidences.map((le) => le.evidence.slice(0, 600)));
-        for (const [i, le] of linkEvidences.entries()) {
-          const linkRow = db.prepare(
-            `SELECT id FROM agent_memory_links WHERE from_item_id = ? AND to_item_id = ? AND relation = ?`,
-          ).get(le.fromId, le.toId, le.relation) as { id: number } | null;
-          if (linkRow?.id) {
-            upsertSearchIndex("link", linkRow.id, agentName, "archival", le.evidence, linkEmbed.embeddings[i] ?? []);
-          }
-        }
-      } catch {}
-    }
+  }
+  let linkEmbeddings: Array<{ fromIdx: number; toIdx: number; relation: string; embedding: number[] }> = [];
+  if (itemPairs.length > 0) {
+    try {
+      const linkEmbed = await requestEmbed(itemPairs.map((p) => p.evidenceText.slice(0, 600)));
+      linkEmbeddings = itemPairs.map((p, i) => ({ fromIdx: p.fromIdx, toIdx: p.toIdx, relation: p.relation, embedding: linkEmbed.embeddings[i] ?? [] }));
+    } catch {}
+  }
+
+  // Atomic commit: archival + compaction + items + links + mark sources
+  const promotion = atomicPromote(db, {
+    agentName,
+    taskId,
+    signature,
+    summary: archivalSummary,
+    structuredJson: structured,
+    source: compacted.source,
+    sourceArtifactIds: selected.map((row) => row.id),
+    items,
+    linkEmbeddings,
+  });
+
+  // JSONL artifacts (outside transaction — append-first canonical pattern)
+  appendMemorySourceArtifact("archival", agentName, {
+    record_type: "tier3_archival",
+    agent_name: agentName,
+    task_id: taskId,
+    result: structured,
+    reflection: archivalSummary,
+  });
+  appendMemoryArtifact(agentName, {
+    record_type: "compaction",
+    event: "created",
+    compaction: snapshotCompaction(promotion.compactionId),
+  });
+  for (const itemId of promotion.itemIds) {
+    appendMemoryArtifact(agentName, { record_type: "compaction_item", event: "created", item: snapshotCompactionItem(itemId) });
+  }
+
+  const compactionId = { id: promotion.compactionId };
+  const createdItems = db.prepare(
+    `SELECT id, item_kind, content FROM agent_memory_compaction_items WHERE compaction_id = ? ORDER BY id ASC`,
+  ).all(promotion.compactionId) as Array<{ id: number; item_kind: string; content: string }>;
+
+  if (compactionId?.id && createdItems.length) {
       // Extract entities via LLM (inference-local-medium), fall back to regex deriveFacts
     const createdByKind = new Map(createdItems.map((item) => [`${item.item_kind}:${item.content}`, item.id]));
     const extractionText = createdItems.map((item) => `${item.item_kind}: ${item.content}`).join("\n");
@@ -1853,6 +1829,12 @@ if (cmd === "refresh") {
     process.exit(64);
   }
   console.log(JSON.stringify(db.prepare("SELECT * FROM agent_memory_refresh_state WHERE agent_name = ?").get(arg1) ?? null));
+} else if (cmd === "promote-status") {
+  if (!arg1) {
+    console.error("Usage: agent-memory promote-status <agent>");
+    process.exit(64);
+  }
+  console.log(JSON.stringify(promotionStatus(db, arg1)));
 } else if (cmd === "rebuild") {
   rebuildMemory(arg1);
 } else if (cmd === "verify") {
