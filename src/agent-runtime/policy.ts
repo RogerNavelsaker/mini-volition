@@ -5,6 +5,12 @@ export type TurnProfileConfig = {
   reasoning_effort: string | null;
   timeout_ms: number;
 };
+
+export type RetryConfig = {
+  maxAttempts: number;
+  backoffMs: number;
+  backoffMultiplier: number;
+};
 export type RetrievalPolicyBurst = {
   primary: { layer: string };
   messages: Array<{ body: string }>;
@@ -83,4 +89,10 @@ export function chooseTurnProfile(source: TurnWakeSource, burst: TurnPolicyBurst
   }
   if (LIGHT_HINT.test(body) && !GLOBAL_HINT.test(body) && !LOCAL_HINT.test(body)) return "light";
   return "full";
+}
+
+export function retryConfig(profile: TurnProfile): RetryConfig {
+  if (profile === "light") return { maxAttempts: 2, backoffMs: 1_000, backoffMultiplier: 1.5 };
+  if (profile === "max") return { maxAttempts: 4, backoffMs: 3_000, backoffMultiplier: 2.0 };
+  return { maxAttempts: 3, backoffMs: 2_000, backoffMultiplier: 2.0 };
 }
