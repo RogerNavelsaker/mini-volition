@@ -2,8 +2,10 @@ id: mini-volition-1fbd
 title: Consensus & Voting Schema
 seed: mini-volition-1fbd
 spec: mini-volition-1fbd
-status: active
+status: done
 createdAt: "2026-04-15T20:40:57.161Z"
-updatedAt: "2026-04-15T20:40:57.161Z"
+updatedAt: "2026-04-17T20:59:03.913Z"
+completedAt: "2026-04-17T20:59:03.912Z"
+completionSummary: Added consensus proposal and vote tables to agent-state, exposed proposal/vote CLI commands, and wired rebuild/verify support plus tests.
 summary: Plan to address Consensus & Voting Schema
 steps:
