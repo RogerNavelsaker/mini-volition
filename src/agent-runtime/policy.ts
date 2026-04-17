@@ -12,6 +12,11 @@ export type RetryConfig = {
   backoffMs: number;
   backoffMultiplier: number;
 };
+export type LimitCooldownState = "quota_exhausted" | "transient_capacity";
+export type CooldownRange = {
+  minMs: number;
+  maxMs: number;
+};
 export type RetrievalPolicyBurst = {
   primary: { layer: string };
   messages: Array<{ body: string }>;
@@ -106,4 +111,23 @@ export function retryConfig(profile: TurnProfile): RetryConfig {
   if (profile === "light") return { maxAttempts: 2, backoffMs: 1_000, backoffMultiplier: 1.5 };
   if (profile === "max") return { maxAttempts: 4, backoffMs: 3_000, backoffMultiplier: 2.0 };
   return { maxAttempts: 3, backoffMs: 2_000, backoffMultiplier: 2.0 };
+}
+
+export function cooldownRange(limitState: LimitCooldownState): CooldownRange {
+  if (limitState === "quota_exhausted") {
+    return { minMs: 60 * 60 * 1000, maxMs: 60 * 60 * 1000 };
+  }
+
+  return { minMs: 10_000, maxMs: 30_000 };
+}
+
+export function randomizedCooldownMs(
+  limitState: LimitCooldownState,
+  random: () => number = Math.random,
+): number {
+  const { minMs, maxMs } = cooldownRange(limitState);
+  if (minMs === maxMs) return minMs;
+
+  const sample = Math.min(1, Math.max(0, random()));
+  return minMs + Math.round((maxMs - minMs) * sample);
 }

@@ -7,7 +7,7 @@ import { createConnection } from "net";
 import { join, dirname } from "path";
 import { ensureSchema as ensureMemorySchema } from "../agent-memory/schema";
 import { appendMemorySourceArtifact } from "../state-artifacts/lib";
-import { chooseRetrievalMode, chooseTurnProfile, classifySourceGroup, retryConfig, turnProfileConfig, type RetrievalMode, type TurnProfile, type WakeSource, type WakeSourceGroup } from "./policy";
+import { chooseRetrievalMode, chooseTurnProfile, classifySourceGroup, randomizedCooldownMs, retryConfig, turnProfileConfig, type RetrievalMode, type TurnProfile, type WakeSource, type WakeSourceGroup } from "./policy";
 import { ensureTurnJournal, recoverInterruptedTurns, replayPolicyForAction, type TurnCheckpoint, type TurnPhase } from "./recovery";
 
 const name = process.env.AGENT_NAME;
@@ -655,10 +655,13 @@ function extractAbsoluteLimitMs(limitInfo: string): number | null {
 }
 
 function getLimitWindow(limitInfo: string, limitState: LimitState): LimitWindow {
-  const defaultMs = limitState === "quota_exhausted" ? 60 * 60 * 1000 : 5 * 60 * 1000;
   const relativeMs = extractRelativeLimitMs(limitInfo);
   const absoluteMs = extractAbsoluteLimitMs(limitInfo);
-  const sleepMs = Math.max(0, relativeMs ?? absoluteMs ?? defaultMs);
+  const fallbackMs =
+    limitState === "none" || limitState === "cancelled"
+      ? 0
+      : randomizedCooldownMs(limitState);
+  const sleepMs = Math.max(0, relativeMs ?? absoluteMs ?? fallbackMs);
 
   return {
     info: limitInfo,

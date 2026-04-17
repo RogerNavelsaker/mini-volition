@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifySourceGroup, retryConfig, turnProfileConfig } from "./policy";
+import { classifySourceGroup, cooldownRange, randomizedCooldownMs, retryConfig, turnProfileConfig } from "./policy";
 
 describe("turnProfileConfig", () => {
   test("uses global timeout as fallback for every profile", () => {
@@ -80,5 +80,33 @@ describe("retryConfig", () => {
   test("backoff increases with profile weight", () => {
     expect(retryConfig("light").backoffMs).toBeLessThan(retryConfig("full").backoffMs);
     expect(retryConfig("full").backoffMs).toBeLessThan(retryConfig("max").backoffMs);
+  });
+});
+
+describe("cooldownRange", () => {
+  test("keeps quota exhaustion on a fixed one-hour cooldown", () => {
+    expect(cooldownRange("quota_exhausted")).toEqual({ minMs: 3_600_000, maxMs: 3_600_000 });
+  });
+
+  test("uses a randomized 10-30 second refractory window for transient capacity", () => {
+    expect(cooldownRange("transient_capacity")).toEqual({ minMs: 10_000, maxMs: 30_000 });
+  });
+});
+
+describe("randomizedCooldownMs", () => {
+  test("returns the exact fixed cooldown for quota exhaustion", () => {
+    expect(randomizedCooldownMs("quota_exhausted", () => 0)).toBe(3_600_000);
+    expect(randomizedCooldownMs("quota_exhausted", () => 1)).toBe(3_600_000);
+  });
+
+  test("samples within the transient capacity jitter window", () => {
+    expect(randomizedCooldownMs("transient_capacity", () => 0)).toBe(10_000);
+    expect(randomizedCooldownMs("transient_capacity", () => 0.5)).toBe(20_000);
+    expect(randomizedCooldownMs("transient_capacity", () => 1)).toBe(30_000);
+  });
+
+  test("clamps invalid random samples into the supported range", () => {
+    expect(randomizedCooldownMs("transient_capacity", () => -1)).toBe(10_000);
+    expect(randomizedCooldownMs("transient_capacity", () => 2)).toBe(30_000);
   });
 });
