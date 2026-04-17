@@ -43,4 +43,40 @@ describe("Agent Jobs Alarms", () => {
 
     expect(cancelled.status).toBe("cancelled");
   });
+
+  test("alarm-peek, alarm-claim, and alarm-complete persist alarm lifecycle", () => {
+    const scheduled = JSON.parse(
+      execSync(
+        `AGENT_JOBS_DB=${dbPath} META_REPO_ROOT=${tempDir} bun run src/agent-jobs/main.ts alarm-set test-agent alarm "wake up now" 2026-04-16T11:00:00Z`,
+      ).toString("utf-8"),
+    ) as { id: number; kind: string; status: string };
+
+    expect(scheduled.kind).toBe("alarm");
+    expect(scheduled.status).toBe("pending");
+
+    const peeked = JSON.parse(
+      execSync(
+        `AGENT_JOBS_DB=${dbPath} META_REPO_ROOT=${tempDir} bun run src/agent-jobs/main.ts alarm-peek test-agent`,
+      ).toString("utf-8"),
+    ) as { id: number };
+
+    expect(peeked.id).toBe(scheduled.id);
+
+    const claimed = JSON.parse(
+      execSync(
+        `AGENT_JOBS_DB=${dbPath} META_REPO_ROOT=${tempDir} bun run src/agent-jobs/main.ts alarm-claim test-agent`,
+      ).toString("utf-8"),
+    ) as { id: number; status: string };
+
+    expect(claimed.id).toBe(scheduled.id);
+    expect(claimed.status).toBe("claimed");
+
+    const completed = JSON.parse(
+      execSync(
+        `AGENT_JOBS_DB=${dbPath} META_REPO_ROOT=${tempDir} bun run src/agent-jobs/main.ts alarm-complete ${scheduled.id} test-agent`,
+      ).toString("utf-8"),
+    ) as { status: string };
+
+    expect(completed.status).toBe("fired");
+  });
 });

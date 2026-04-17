@@ -154,3 +154,14 @@ export function reclaimStaleEventClaims(db: Database, agent: string, ttlMs: numb
   }
   return reclaimed;
 }
+
+export function nextDueAlarm(db: Database, agent: string) {
+  return db.prepare(
+    `SELECT * FROM fleet_job_alarms
+     WHERE target_agent = ?
+       AND status = 'pending'
+       AND datetime(due_at) <= CURRENT_TIMESTAMP
+     ORDER BY datetime(due_at) ASC, id ASC
+     LIMIT 1`,
+  ).get(agent) as any;
+}

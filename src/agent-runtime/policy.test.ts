@@ -42,6 +42,11 @@ describe("classifySourceGroup", () => {
     expect(classifySourceGroup("internal_job", "urgent")).toBe("internal");
   });
 
+  test("classifies alarms and local events as internal", () => {
+    expect(classifySourceGroup("alarm", "internal")).toBe("internal");
+    expect(classifySourceGroup("local_event", "internal")).toBe("internal");
+  });
+
   test("classifies mail layers into stable source groups", () => {
     expect(classifySourceGroup("mail_burst", "urgent")).toBe("urgent");
     expect(classifySourceGroup("mail_burst", "private")).toBe("direct");
@@ -123,6 +128,11 @@ describe("wakeClassFor", () => {
   test("keeps internal jobs in the refractory class regardless of urgency hints", () => {
     expect(wakeClassFor("internal_job", "internal")).toBe("refractory");
     expect(wakeClassFor("internal_job", "urgent")).toBe("refractory");
+  });
+
+  test("keeps alarms and local events in the refractory class", () => {
+    expect(wakeClassFor("alarm", "internal")).toBe("refractory");
+    expect(wakeClassFor("local_event", "internal")).toBe("refractory");
   });
 
   test("lets direct and urgent mail bypass the refractory window", () => {

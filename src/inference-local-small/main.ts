@@ -118,6 +118,49 @@ Turn text:
 ${request.text.slice(0, 2000)}`;
 }
 
+function buildWakeChoicePrompt(request: {
+  candidates: Array<{
+    id: number;
+    source: string;
+    wake_class: string;
+    priority: number;
+    source_group: string;
+    wake_reason: string;
+    sender: string;
+    layer: string;
+    body: string;
+  }>;
+}) {
+  const candidates = request.candidates
+    .map((candidate, index) => [
+      `${index + 1}. id=${candidate.id}`,
+      `source=${candidate.source}`,
+      `class=${candidate.wake_class}`,
+      `priority=${candidate.priority}`,
+      `group=${candidate.source_group}`,
+      `reason=${candidate.wake_reason}`,
+      `sender=${candidate.sender}`,
+      `layer=${candidate.layer}`,
+      `body=${candidate.body.replace(/\s+/g, " ").slice(0, 220)}`,
+    ].join(" | "))
+    .join("\n");
+
+  return `You are the inference backend for a persistent multi-agent runtime.
+Choose the next wake the agent should handle.
+Return strict JSON with keys:
+- id: candidate id
+- reason: one short sentence
+
+Guidance:
+- urgent and direct work usually deserves immediate attention
+- alarms, reminders, and local events can be chosen when they unblock useful progress
+- you may defer noisy, low-leverage, or redundant work
+- choose exactly one candidate id from the list
+
+Candidates:
+${candidates}`;
+}
+
 async function handleRequest(request: any) {
   switch (request.type) {
     case "summarize": {
@@ -157,6 +200,18 @@ async function handleRequest(request: any) {
       }
       return { profile, reason: parsed.reason.replace(/\s+/g, " ").trim(), source: modelId };
     }
+    case "choose_next_wake": {
+      if (!Array.isArray(request.candidates) || request.candidates.length === 0) {
+        throw new Error("choose_next_wake requires candidates[]");
+      }
+      const raw = await generate(buildWakeChoicePrompt({ candidates: request.candidates }), 120);
+      const parsed = JSON.parse(raw) as { id?: number | string; reason?: string };
+      const id = typeof parsed.id === "number" ? parsed.id : typeof parsed.id === "string" ? Number(parsed.id) : NaN;
+      if (!Number.isInteger(id) || typeof parsed.reason !== "string") {
+        throw new Error(`Model returned malformed JSON: ${raw}`);
+      }
+      return { id, reason: parsed.reason.replace(/\s+/g, " ").trim(), source: modelId };
+    }
     case "decompose_keywords": {
       const text = typeof request.text === "string" ? request.text.trim() : "";
       if (!text) throw new Error("decompose_keywords requires non-empty text");
@@ -189,7 +244,7 @@ ${text.slice(0, 1800)}`;
       return { result, source: modelId };
     }
     default:
-      throw new Error(`Unsupported request type: ${request.type}. This worker handles 'summarize', 'choose_retrieval_mode', 'choose_turn_profile', 'decompose_keywords', and 'scribe'.`);
+      throw new Error(`Unsupported request type: ${request.type}. This worker handles 'summarize', 'choose_retrieval_mode', 'choose_turn_profile', 'choose_next_wake', 'decompose_keywords', and 'scribe'.`);
   }
 }
 

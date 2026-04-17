@@ -1,6 +1,6 @@
 export type RetrievalMode = "local" | "global" | "mix";
 export type TurnProfile = "light" | "full" | "max";
-export type WakeSource = "internal_job" | "mail_burst";
+export type WakeSource = "internal_job" | "mail_burst" | "alarm" | "local_event";
 export type WakeSourceGroup = "internal" | "urgent" | "direct" | "social" | "ambient";
 export type TurnProfileConfig = {
   model: string | null;
@@ -69,7 +69,7 @@ export function turnProfileConfig(
 }
 
 export function classifySourceGroup(source: WakeSource, primaryLayer: string): WakeSourceGroup {
-  if (source === "internal_job") return "internal";
+  if (source === "internal_job" || source === "alarm" || source === "local_event") return "internal";
 
   const layer = primaryLayer.toLowerCase();
   if (layer === "urgent") return "urgent";
@@ -82,7 +82,7 @@ export function chooseRetrievalMode(source: RetrievalWakeSource, burst: Retrieva
   const primaryLayer = burst.primary.layer.toLowerCase();
   const body = burst.messages.map((entry) => entry.body.toLowerCase()).join("\n");
 
-  if (source === "internal_job") {
+  if (source === "internal_job" || source === "alarm" || source === "local_event") {
     if (GLOBAL_HINT.test(body)) return "global";
     return "local";
   }
@@ -142,7 +142,7 @@ export function wakeClassFor(
   source: WakeSource,
   primaryLayer: string,
 ): WakeClass {
-  if (source === "internal_job") return "refractory";
+  if (source === "internal_job" || source === "alarm" || source === "local_event") return "refractory";
 
   const layer = primaryLayer.toLowerCase();
   if (layer === "urgent" || layer === "private") return "hot";

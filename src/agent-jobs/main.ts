@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { ensureJobSchema, nextQueuedEvent, nextQueuedJob, normalizePriority, PRIORITIES, reclaimStaleClaims, reclaimStaleEventClaims } from "./core";
+import { ensureJobSchema, nextDueAlarm, nextQueuedEvent, nextQueuedJob, normalizePriority, PRIORITIES, reclaimStaleClaims, reclaimStaleEventClaims } from "./core";
 import { appendJobArtifact } from "../state-artifacts/lib";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
@@ -31,7 +31,7 @@ const [, , cmd, arg1, arg2, arg3, arg4] = Bun.argv;
 const arg5 = Bun.argv[7];
 
 function usage(): never {
-  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|event-publish|event-peek|event-claim|event-complete|event-list|alarm-set|alarm-list|alarm-cancel|reclaim-stale|rebuild|verify|list|skill> ...");
+  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|event-publish|event-peek|event-claim|event-complete|event-list|alarm-set|alarm-peek|alarm-claim|alarm-complete|alarm-list|alarm-cancel|reclaim-stale|rebuild|verify|list|skill> ...");
   process.exit(64);
 }
 
@@ -596,6 +596,57 @@ if (cmd === "queue") {
   } else {
     console.log(JSON.stringify(db.prepare("SELECT * FROM fleet_job_alarms ORDER BY datetime(due_at) ASC, id ASC LIMIT ?").all(limit)));
   }
+} else if (cmd === "alarm-peek") {
+  if (!arg1) {
+    console.error("Usage: agent-jobs alarm-peek <agent>");
+    process.exit(64);
+  }
+  console.log(JSON.stringify(nextDueAlarm(db, arg1) ?? null));
+} else if (cmd === "alarm-claim") {
+  if (!arg1) {
+    console.error("Usage: agent-jobs alarm-claim <agent> [alarmId]");
+    process.exit(64);
+  }
+  const requestedId = arg2 ? Math.max(1, parseInt(arg2, 10) || 0) : null;
+  const alarm = requestedId
+    ? db.prepare(
+        `SELECT * FROM fleet_job_alarms
+         WHERE id = ?
+           AND target_agent = ?
+           AND status = 'pending'
+           AND datetime(due_at) <= CURRENT_TIMESTAMP`,
+      ).get(requestedId, arg1) as any
+    : nextDueAlarm(db, arg1);
+  if (!alarm) {
+    console.log("null");
+    process.exit(0);
+  }
+  db.run(
+    `UPDATE fleet_job_alarms
+     SET status = 'claimed',
+         fired_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status = 'pending'`,
+    [alarm.id],
+  );
+  const claimed = db.prepare("SELECT * FROM fleet_job_alarms WHERE id = ?").get(alarm.id) as any;
+  appendJobArtifact(arg1, { record_type: "alarm", event: "claimed", alarm: claimed });
+  console.log(JSON.stringify(claimed?.status === "claimed" ? claimed : null));
+} else if (cmd === "alarm-complete") {
+  if (!arg1 || !arg2) {
+    console.error("Usage: agent-jobs alarm-complete <alarmId> <agent>");
+    process.exit(64);
+  }
+  db.run(
+    `UPDATE fleet_job_alarms
+     SET status = 'fired',
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [Number(arg1)],
+  );
+  const alarm = db.prepare("SELECT * FROM fleet_job_alarms WHERE id = ?").get(Number(arg1)) as any;
+  appendJobArtifact(arg2, { record_type: "alarm", event: "fired", alarm });
+  console.log(JSON.stringify(alarm ?? null));
 } else if (cmd === "alarm-cancel") {
   if (!arg1 || !arg2) {
     console.error("Usage: agent-jobs alarm-cancel <alarmId> <agent>");

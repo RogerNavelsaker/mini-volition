@@ -358,6 +358,44 @@ type InternalJob = {
   created_at: string;
   updated_at: string;
 };
+type LocalEvent = {
+  id: number;
+  target_agent: string;
+  event_type: string;
+  source: string;
+  content: string;
+  available_at: string | null;
+  status: string;
+  claimed_at: string | null;
+  claimed_by: string | null;
+  completed_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+type JobAlarm = {
+  id: number;
+  target_agent: string;
+  kind: "alarm" | "reminder";
+  message: string;
+  due_at: string;
+  status: string;
+  source_job_id: number | null;
+  fired_at: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+type WakeCandidate = {
+  source: WakeSource;
+  sourceGroup: WakeSourceGroup;
+  wakeReason: string;
+  priority: number;
+  wakeClass: WakeClass;
+  burst: IncomingBurst;
+  claimId: number;
+  sourceLabel: string;
+};
 type WakeEvent = {
   source: WakeSource;
   sourceGroup: WakeSourceGroup;
@@ -885,6 +923,30 @@ function reclaimStaleInternalJobs() {
   runJsonCommand(jobsBin, ["reclaim-stale", name!, String(jobClaimTtlMs)]);
 }
 
+function peekLocalEvent(): LocalEvent | null {
+  return (runJsonCommand(jobsBin, ["event-peek", name!]) ?? null) as LocalEvent | null;
+}
+
+function claimLocalEvent(eventId?: number): LocalEvent | null {
+  return (runJsonCommand(jobsBin, ["event-claim", name!, ...(eventId ? [String(eventId)] : [])]) ?? null) as LocalEvent | null;
+}
+
+function completeLocalEvent(eventId: number, error?: string | null) {
+  runJsonCommand(jobsBin, ["event-complete", String(eventId), name!, ...(error ? [error] : [])]);
+}
+
+function peekAlarm(): JobAlarm | null {
+  return (runJsonCommand(jobsBin, ["alarm-peek", name!]) ?? null) as JobAlarm | null;
+}
+
+function claimAlarm(alarmId?: number): JobAlarm | null {
+  return (runJsonCommand(jobsBin, ["alarm-claim", name!, ...(alarmId ? [String(alarmId)] : [])]) ?? null) as JobAlarm | null;
+}
+
+function completeAlarm(alarmId: number) {
+  runJsonCommand(jobsBin, ["alarm-complete", String(alarmId), name!]);
+}
+
 function claimInternalJob(jobId?: number): InternalJob | null {
   return (runJsonCommand(jobsBin, ["claim", name!, ...(jobId ? [String(jobId)] : [])]) ?? null) as InternalJob | null;
 }
@@ -1302,6 +1364,87 @@ function internalJobPriority(priority?: JobPriority): number {
   return 50;
 }
 
+function syntheticBurstFromInternal(
+  id: number,
+  sender: string,
+  body: string,
+  createdAt: string,
+): IncomingBurst {
+  const normalizedCreatedAt = createdAt.endsWith("Z") ? createdAt : `${createdAt}Z`;
+  return {
+    primary: {
+      id,
+      sender,
+      body,
+      layer: "internal",
+      recipient: name!,
+      created_at: normalizedCreatedAt,
+    },
+    messages: [
+      {
+        id,
+        sender,
+        body,
+        layer: "internal",
+        recipient: name!,
+        created_at: normalizedCreatedAt,
+      },
+    ],
+    mergedCount: 1,
+    remainingUnread: 0,
+  };
+}
+
+function summarizeWakeCandidate(candidate: WakeCandidate, index: number): string {
+  const body = candidate.burst.primary.body.replace(/\s+/g, " ").slice(0, 220);
+  return [
+    `${index}. id=${candidate.claimId}`,
+    `source=${candidate.source}`,
+    `class=${candidate.wakeClass}`,
+    `priority=${candidate.priority}`,
+    `group=${candidate.sourceGroup}`,
+    `reason=${candidate.wakeReason}`,
+    `sender=${candidate.burst.primary.sender}`,
+    `layer=${candidate.burst.primary.layer}`,
+    `body=${body}`,
+  ].join(" | ");
+}
+
+function renderWakeChoicePrompt(candidates: WakeCandidate[]): string {
+  return [
+    "Choose the next wake to handle.",
+    "Return strict JSON only: {\"id\": <candidate id>, \"reason\": \"<short reason>\"}.",
+    "Prefer urgent/direct work when needed, but you may defer noisy or low-leverage work.",
+    "",
+    "Candidates:",
+    ...candidates.map((candidate, index) => summarizeWakeCandidate(candidate, index + 1)),
+  ].join("\n");
+}
+
+function parseWakeChoice(raw: string, candidates: WakeCandidate[]): WakeCandidate | null {
+  const parsed = parseActionEnvelope(raw);
+  if (!parsed || typeof parsed !== "object") return null;
+  const chosenId = (parsed as Record<string, unknown>).id;
+  const id = typeof chosenId === "number" ? chosenId : typeof chosenId === "string" ? Number(chosenId) : NaN;
+  if (!Number.isInteger(id)) return null;
+  return candidates.find((candidate) => candidate.claimId === id) ?? null;
+}
+
+function deterministicWakeChoice(candidates: WakeCandidate[]): WakeCandidate | null {
+  const sourceRank = (source: WakeSource): number => {
+    if (source === "internal_job") return 4;
+    if (source === "alarm") return 3;
+    if (source === "local_event") return 2;
+    return 1;
+  };
+  return [...candidates].sort((left, right) => {
+    if (right.priority !== left.priority) return right.priority - left.priority;
+    if (left.wakeClass !== right.wakeClass) return left.wakeClass === "hot" ? -1 : 1;
+    if (sourceRank(right.source) !== sourceRank(left.source)) return sourceRank(right.source) - sourceRank(left.source);
+    return left.claimId - right.claimId;
+  })[0] ?? null;
+}
+
 const refractoryCooldowns = new Map<WakeSourceGroup, number>();
 
 function wakeClassFor(source: WakeSource, burst: IncomingBurst, _jobPriority?: JobPriority): WakeClass {
@@ -1312,6 +1455,12 @@ function wakePriorityFor(source: WakeSource, burst: IncomingBurst, jobPriority?:
   if (source === "internal_job") {
     return internalJobPriority(jobPriority);
   }
+  if (source === "alarm") {
+    return burst.primary.body.startsWith("reminder:") ? 55 : 65;
+  }
+  if (source === "local_event") {
+    return 60;
+  }
   const layer = burst.primary.layer.toLowerCase();
   if (layer === "urgent") return 100;
   if (layer === "private") return 80;
@@ -1321,6 +1470,127 @@ function wakePriorityFor(source: WakeSource, burst: IncomingBurst, jobPriority?:
 
 function wakeSourceGroupFor(source: WakeSource, burst: IncomingBurst): WakeSourceGroup {
   return classifySourceGroup(source, burst.primary.layer);
+}
+
+function requestInferenceWakeChoice(candidates: WakeCandidate[]): Promise<WakeCandidate | null> {
+  return new Promise((resolve) => {
+    const socket = createConnection(lightSocket);
+    let buffer = "";
+    let settled = false;
+    const finish = (value: WakeCandidate | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        socket.end();
+      } catch {}
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), 2000);
+    socket.on("connect", () => {
+      socket.write(`${JSON.stringify({
+        type: "choose_next_wake",
+        candidates: candidates.map((candidate) => ({
+          id: candidate.claimId,
+          source: candidate.source,
+          wake_class: candidate.wakeClass,
+          priority: candidate.priority,
+          source_group: candidate.sourceGroup,
+          wake_reason: candidate.wakeReason,
+          sender: candidate.burst.primary.sender,
+          layer: candidate.burst.primary.layer,
+          body: candidate.burst.primary.body,
+        })),
+      })}\n`);
+    });
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf-8");
+      const newline = buffer.indexOf("\n");
+      if (newline === -1) return;
+      try {
+        finish(parseWakeChoice(buffer.slice(0, newline).trim(), candidates));
+      } catch {
+        finish(null);
+      }
+    });
+    socket.on("error", () => finish(null));
+    socket.on("end", () => finish(null));
+  });
+}
+
+function claimWakeCandidate(candidate: WakeCandidate): WakeEvent | null {
+  if (candidate.source === "internal_job") {
+    const claimedJob = claimInternalJob(candidate.claimId);
+    if (!claimedJob) return null;
+    const burst = syntheticBurstFromInternal(claimedJob.id, claimedJob.sender, claimedJob.body, claimedJob.created_at);
+    return {
+      source: "internal_job",
+      sourceGroup: wakeSourceGroupFor("internal_job", burst),
+      wakeReason: `job:${claimedJob.id}`,
+      priority: wakePriorityFor("internal_job", burst, claimedJob.priority),
+      wakeClass: wakeClassFor("internal_job", burst, claimedJob.priority),
+      burst,
+    };
+  }
+  if (candidate.source === "alarm") {
+    const claimedAlarm = claimAlarm(candidate.claimId);
+    if (!claimedAlarm) return null;
+    const burst = syntheticBurstFromInternal(
+      claimedAlarm.id,
+      claimedAlarm.kind,
+      `${claimedAlarm.kind}:${claimedAlarm.message}`,
+      claimedAlarm.due_at,
+    );
+    return {
+      source: "alarm",
+      sourceGroup: wakeSourceGroupFor("alarm", burst),
+      wakeReason: `${claimedAlarm.kind}:${claimedAlarm.id}`,
+      priority: wakePriorityFor("alarm", burst),
+      wakeClass: wakeClassFor("alarm", burst),
+      burst,
+    };
+  }
+  if (candidate.source === "local_event") {
+    const claimedEvent = claimLocalEvent(candidate.claimId);
+    if (!claimedEvent) return null;
+    const burst = syntheticBurstFromInternal(claimedEvent.id, claimedEvent.source, claimedEvent.content, claimedEvent.created_at);
+    return {
+      source: "local_event",
+      sourceGroup: wakeSourceGroupFor("local_event", burst),
+      wakeReason: `event:${claimedEvent.event_type}:${claimedEvent.id}`,
+      priority: wakePriorityFor("local_event", burst),
+      wakeClass: wakeClassFor("local_event", burst),
+      burst,
+    };
+  }
+  const claimedMailBurst = claimMailBurst(candidate.claimId);
+  if (!claimedMailBurst) return null;
+  return {
+    source: "mail_burst",
+    sourceGroup: wakeSourceGroupFor("mail_burst", claimedMailBurst),
+    wakeReason: `mail:${claimedMailBurst.primary.layer}:${claimedMailBurst.primary.id}`,
+    priority: wakePriorityFor("mail_burst", claimedMailBurst),
+    wakeClass: wakeClassFor("mail_burst", claimedMailBurst),
+    burst: claimedMailBurst,
+  };
+}
+
+function completeWake(wake: WakeEvent, errorText?: string | null) {
+  const messageId = wake.burst.primary.id;
+  if (wake.source === "internal_job") {
+    if (errorText) failInternalJob(messageId, errorText);
+    else completeInternalJob(messageId);
+    return;
+  }
+  if (wake.source === "alarm") {
+    completeAlarm(messageId);
+    return;
+  }
+  if (wake.source === "local_event") {
+    completeLocalEvent(messageId, errorText ?? undefined);
+    return;
+  }
+  if (!errorText) completeMailBurst(wake.burst.messages.map((entry) => entry.id));
 }
 
 function activeRefractoryDeadline(sourceGroup: WakeSourceGroup, now = Date.now()): number | null {
@@ -1355,33 +1625,30 @@ function nextRefractoryCooldownDelay(now = Date.now()): number | null {
   return nextDeadline === null ? null : Math.max(0, nextDeadline - now);
 }
 
-async function selectNextWake(options?: { allowWorkload?: boolean; blockingMail?: boolean }): Promise<WakeEvent | null> {
+function enumerateWakeCandidates(options?: { allowWorkload?: boolean }): { candidates: WakeCandidate[]; bestNonMailPriority: number } {
   const allowWorkload = options?.allowWorkload ?? true;
-  const blockingMail = options?.blockingMail ?? true;
   const now = Date.now();
   reclaimStaleInternalJobs();
   reclaimStaleMailClaims();
   const queuedJob = peekInternalJob();
   const mailBurst = peekMailBurst();
-  const queuedJobBurst = queuedJob
-    ? {
-        primary: {
-          id: queuedJob.id,
-          sender: queuedJob.sender,
-          body: queuedJob.body,
-          layer: "internal",
-          recipient: name!,
-          created_at: queuedJob.created_at.endsWith("Z") ? queuedJob.created_at : `${queuedJob.created_at}Z`,
-        },
-        messages: [],
-        mergedCount: 1,
-        remainingUnread: 0,
-      } satisfies IncomingBurst
+  const localEvent = peekLocalEvent();
+  const alarm = peekAlarm();
+  const queuedJobBurst = queuedJob ? syntheticBurstFromInternal(queuedJob.id, queuedJob.sender, queuedJob.body, queuedJob.created_at) : null;
+  const localEventBurst = localEvent
+    ? syntheticBurstFromInternal(localEvent.id, localEvent.source, localEvent.content, localEvent.created_at)
+    : null;
+  const alarmBurst = alarm
+    ? syntheticBurstFromInternal(alarm.id, alarm.kind, `${alarm.kind}:${alarm.message}`, alarm.due_at)
     : null;
   const jobWakeClass = queuedJobBurst ? wakeClassFor("internal_job", queuedJobBurst, queuedJob.priority) : null;
   const mailWakeClass = mailBurst ? wakeClassFor("mail_burst", mailBurst) : null;
+  const localEventWakeClass = localEventBurst ? wakeClassFor("local_event", localEventBurst) : null;
+  const alarmWakeClass = alarmBurst ? wakeClassFor("alarm", alarmBurst) : null;
   const jobSourceGroup = queuedJobBurst ? wakeSourceGroupFor("internal_job", queuedJobBurst) : null;
   const mailSourceGroup = mailBurst ? wakeSourceGroupFor("mail_burst", mailBurst) : null;
+  const localEventSourceGroup = localEventBurst ? wakeSourceGroupFor("local_event", localEventBurst) : null;
+  const alarmSourceGroup = alarmBurst ? wakeSourceGroupFor("alarm", alarmBurst) : null;
   const eligibleJobBurst = queuedJobBurst
     && (allowWorkload || jobWakeClass === "hot")
     && (jobWakeClass === "hot" || !isRefractoryCoolingDown(jobSourceGroup!, now))
@@ -1392,58 +1659,96 @@ async function selectNextWake(options?: { allowWorkload?: boolean; blockingMail?
     && (mailWakeClass === "hot" || !isRefractoryCoolingDown(mailSourceGroup!, now))
       ? mailBurst
       : null;
+  const eligibleLocalEventBurst = localEventBurst
+    && (allowWorkload || localEventWakeClass === "hot")
+    && (localEventWakeClass === "hot" || !isRefractoryCoolingDown(localEventSourceGroup!, now))
+      ? localEventBurst
+      : null;
+  const eligibleAlarmBurst = alarmBurst
+    && (allowWorkload || alarmWakeClass === "hot")
+    && (alarmWakeClass === "hot" || !isRefractoryCoolingDown(alarmSourceGroup!, now))
+      ? alarmBurst
+      : null;
   const mailPriority = eligibleMailBurst ? wakePriorityFor("mail_burst", eligibleMailBurst) : -1;
   const jobPriority = eligibleJobBurst && queuedJob ? wakePriorityFor("internal_job", eligibleJobBurst, queuedJob.priority) : -1;
+  const localEventPriority = eligibleLocalEventBurst ? wakePriorityFor("local_event", eligibleLocalEventBurst) : -1;
+  const alarmPriority = eligibleAlarmBurst ? wakePriorityFor("alarm", eligibleAlarmBurst) : -1;
+  const candidates: WakeCandidate[] = [];
 
-  if (queuedJob && eligibleJobBurst && jobPriority >= mailPriority) {
-    const claimedJob = claimInternalJob(queuedJob.id);
-    if (!claimedJob) return selectNextWake();
-    const createdAt = claimedJob.created_at.endsWith("Z") ? claimedJob.created_at : `${claimedJob.created_at}Z`;
-    return {
+  if (queuedJob && eligibleJobBurst) {
+    candidates.push({
       source: "internal_job",
       sourceGroup: jobSourceGroup!,
-      wakeReason: `job:${claimedJob.id}`,
+      wakeReason: `job:${queuedJob.id}`,
       priority: jobPriority,
-      wakeClass: wakeClassFor("internal_job", eligibleJobBurst, claimedJob.priority),
-      burst: {
-        primary: {
-          id: claimedJob.id,
-          sender: claimedJob.sender,
-          body: claimedJob.body,
-          layer: "internal",
-          recipient: name!,
-          created_at: createdAt,
-        },
-        messages: [
-          {
-            id: claimedJob.id,
-            sender: claimedJob.sender,
-            body: claimedJob.body,
-            layer: "internal",
-            recipient: name!,
-            created_at: createdAt,
-          },
-        ],
-        mergedCount: 1,
-        remainingUnread: 0,
-      },
-    };
+      wakeClass: wakeClassFor("internal_job", eligibleJobBurst, queuedJob.priority),
+      burst: eligibleJobBurst,
+      claimId: queuedJob.id,
+      sourceLabel: queuedJob.sender,
+    });
   }
-
+  if (alarm && eligibleAlarmBurst) {
+    candidates.push({
+      source: "alarm",
+      sourceGroup: alarmSourceGroup!,
+      wakeReason: `${alarm.kind}:${alarm.id}`,
+      priority: alarmPriority,
+      wakeClass: wakeClassFor("alarm", eligibleAlarmBurst),
+      burst: eligibleAlarmBurst,
+      claimId: alarm.id,
+      sourceLabel: alarm.kind,
+    });
+  }
+  if (localEvent && eligibleLocalEventBurst) {
+    candidates.push({
+      source: "local_event",
+      sourceGroup: localEventSourceGroup!,
+      wakeReason: `event:${localEvent.event_type}:${localEvent.id}`,
+      priority: localEventPriority,
+      wakeClass: wakeClassFor("local_event", eligibleLocalEventBurst),
+      burst: eligibleLocalEventBurst,
+      claimId: localEvent.id,
+      sourceLabel: localEvent.event_type,
+    });
+  }
   if (eligibleMailBurst) {
-    const claimedMailBurst = claimMailBurst(eligibleMailBurst.primary.id);
-    if (!claimedMailBurst) return selectNextWake();
-    return {
+    candidates.push({
       source: "mail_burst",
       sourceGroup: mailSourceGroup!,
-      wakeReason: `mail:${claimedMailBurst.primary.layer}:${claimedMailBurst.primary.id}`,
+      wakeReason: `mail:${eligibleMailBurst.primary.layer}:${eligibleMailBurst.primary.id}`,
       priority: mailPriority,
-      wakeClass: wakeClassFor("mail_burst", claimedMailBurst),
-      burst: claimedMailBurst,
-    };
+      wakeClass: wakeClassFor("mail_burst", eligibleMailBurst),
+      burst: eligibleMailBurst,
+      claimId: eligibleMailBurst.primary.id,
+      sourceLabel: eligibleMailBurst.primary.layer,
+    });
+  }
+
+  return { candidates, bestNonMailPriority: Math.max(jobPriority, localEventPriority, alarmPriority) };
+}
+
+async function selectNextWake(options?: { allowWorkload?: boolean; blockingMail?: boolean }): Promise<WakeEvent | null> {
+  const blockingMail = options?.blockingMail ?? true;
+  const now = Date.now();
+  const { candidates, bestNonMailPriority } = enumerateWakeCandidates(options);
+
+  if (candidates.length > 0) {
+    let remaining = [...candidates];
+    while (remaining.length > 0) {
+      const preferred = remaining.length === 1
+        ? remaining[0]
+        : (await requestInferenceWakeChoice(remaining)) ?? deterministicWakeChoice(remaining);
+      if (!preferred) break;
+      const claimed = claimWakeCandidate(preferred);
+      if (claimed) return claimed;
+      remaining = remaining.filter((candidate) => candidate.source !== preferred.source || candidate.claimId !== preferred.claimId);
+    }
+    return null;
   }
 
   if (!blockingMail) return null;
+
+  if (bestNonMailPriority >= 0) return null;
 
   const refractoryDelayMs = nextRefractoryCooldownDelay(now);
   if (refractoryDelayMs !== null && refractoryDelayMs > 0) {
@@ -1725,7 +2030,7 @@ async function processWakeEvent(
   }
   const forceFullProfile = isRerunJob(msg);
   const turnKey = `${wake.source}:${msg.id}:${Date.now()}`;
-  const currentTask = wake.source === "internal_job" ? `job:${msg.id}` : `message:${msg.id}`;
+  const currentTask = wake.source === "mail_burst" ? `message:${msg.id}` : `${wake.source}:${msg.id}`;
   let checkpointPromptHash: string | null = null;
   let checkpointPromptChars = 0;
   const bufferedActionRecords: BufferedActionRecord[] = [];
@@ -2222,7 +2527,7 @@ async function processWakeEvent(
       recordBufferedTurnPhase("failed", errorText);
       flushTurnEventBatch(bufferedTurnPhases, bufferedTurnCheckpoints);
       setRuntimeState("error", currentTask, "provider_error", errorText, null, String(msg.id));
-      if (msg.layer === "internal") failInternalJob(msg.id, errorText);
+      completeWake(wake, wake.source === "internal_job" ? errorText : wake.source === "local_event" ? errorText : null);
       console.error(`Provider turn failed for ${name}: ${errorText}`);
     } else if (!envelope) {
       const invalidReason = envelopeResult?.ok === false ? envelopeResult.error : "Agent did not return valid JSON envelope.";
@@ -2247,7 +2552,7 @@ async function processWakeEvent(
       if (msg.layer !== "internal") {
         sendMessage(msg.sender, msg.layer, `[SYSTEM MESSAGE]: The agent '${name}' returned an invalid action envelope and no actions were executed.`);
       } else {
-        failInternalJob(msg.id, invalidReason);
+        completeWake(wake, invalidReason);
       }
       recordWorking("system", `Rejected invalid action envelope: ${invalidReason}`);
       console.error(`Invalid action envelope from ${name}: ${invalidReason}`);
@@ -2308,8 +2613,7 @@ async function processWakeEvent(
         recordBufferedTurnPhase("completed", envelope.summary ?? null);
         flushTurnEventBatch(bufferedTurnPhases, bufferedTurnCheckpoints);
         bumpGovernor(120, 4, `turn_complete:${wake.sourceGroup}`);
-        if (msg.layer === "internal") completeInternalJob(msg.id);
-        else completeMailBurst(burst.messages.map((entry) => entry.id));
+        completeWake(wake);
         setRuntimeState(
           options?.successStatus ?? "idle",
           options?.successCurrentTask ?? "awaiting_message",
@@ -2345,7 +2649,7 @@ async function processWakeEvent(
     recordBufferedTurnPhase("failed", errorText);
     flushTurnEventBatch(bufferedTurnPhases, bufferedTurnCheckpoints);
     setRuntimeState("error", currentTask, "turn_crash", errorText, null, String(msg.id));
-    if (msg.layer === "internal") failInternalJob(msg.id, errorText);
+    completeWake(wake, wake.source === "internal_job" ? errorText : wake.source === "local_event" ? errorText : null);
     recordWorking("system", `Turn crashed: ${errorText}`);
     console.error(`Turn crashed for ${name}: ${errorText}`);
   }
@@ -2365,6 +2669,12 @@ async function runWorker() {
     if (turn.wake_source === "internal_job") {
       rescheduleInternalJob(turn.message_id, new Date().toISOString(), "replayed after interrupted turn recovery");
       recordWorking("system", `Rescheduled interrupted internal turn ${turn.turn_key} as job ${turn.message_id}`);
+    } else if (turn.wake_source === "local_event") {
+      completeLocalEvent(turn.message_id, "replayed after interrupted turn recovery");
+      recordWorking("system", `Completed interrupted local event turn ${turn.turn_key} as event ${turn.message_id}`);
+    } else if (turn.wake_source === "alarm") {
+      completeAlarm(turn.message_id);
+      recordWorking("system", `Completed interrupted alarm turn ${turn.turn_key} as alarm ${turn.message_id}`);
     } else if (turn.wake_source === "mail_burst") {
       releaseMailClaims([turn.message_id]);
       recordWorking("system", `Released interrupted mail claim for turn ${turn.turn_key} message ${turn.message_id}`);
