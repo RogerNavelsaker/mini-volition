@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { createConnection } from "net";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
+import { buildLookupCacheKey, invalidateLookupCache, readLookupCache, resolveLookupExpiry, writeLookupCache } from "./cache";
 import { computeNodeCentrality } from "./centrality";
 import { selectCompactionCandidates } from "./compaction";
 import { relationForItemKinds, upsertMemoryLink, invalidateMemoryLinks, timelineQueryTokens } from "./links";
@@ -54,6 +55,7 @@ if (Bun.argv[2] === "skill") {
 
 const [, , cmd, arg1, arg2] = Bun.argv;
 const staleAfterSeconds = Math.max(30, parseInt(process.env.FLEET_MEMORY_STALE_AFTER_SEC || "900", 10) || 900);
+const lookupCacheTtlSeconds = Math.max(5, parseInt(process.env.FLEET_MEMORY_CACHE_TTL_SEC || "60", 10) || 60);
 const decayGraceDays = Math.max(0, parseInt(process.env.FLEET_MEMORY_DECAY_GRACE_DAYS || "7", 10) || 7);
 const decayFloor = Math.max(0, Math.min(1, parseFloat(process.env.FLEET_MEMORY_DECAY_FLOOR || "0.1") || 0.1));
 const rrfK = Math.max(1, parseInt(process.env.FLEET_MEMORY_RRF_K || "60", 10) || 60);
@@ -532,6 +534,7 @@ async function refresh(agentName: string) {
          updated_at = CURRENT_TIMESTAMP`,
       [agentName, candidates.length],
     );
+    invalidateLookupCache(db, agentName);
     console.log(JSON.stringify({ refreshed: 0, source: "cache", artifact_count: candidates.length }));
     return;
   }
@@ -599,6 +602,7 @@ async function refresh(agentName: string) {
       event: "ready",
       refresh_state: snapshotRefreshState(agentName),
     });
+    invalidateLookupCache(db, agentName);
     console.log(JSON.stringify({ refreshed: stale.length, source: embed.source, artifact_count: candidates.length }));
   } catch (error) {
     db.run(
@@ -619,6 +623,7 @@ async function refresh(agentName: string) {
       event: "error",
       refresh_state: snapshotRefreshState(agentName),
     });
+    invalidateLookupCache(db, agentName);
     throw error;
   }
 }
@@ -671,6 +676,7 @@ function reinforce(agentName: string, artifactIds: number[]) {
       });
     }
   }
+  invalidateLookupCache(db, agentName);
   console.log(JSON.stringify({ reinforced: ids.length }));
 }
 
@@ -729,6 +735,7 @@ function decay(agentName: string) {
     });
     decayed += 1;
   }
+  invalidateLookupCache(db, agentName);
   console.log(JSON.stringify({ decayed, grace_days: decayGraceDays, decay_floor: decayFloor }));
 }
 
@@ -769,6 +776,7 @@ function rebalance(agentName: string) {
     updated += 1;
   }
 
+  invalidateLookupCache(db, agentName);
   console.log(JSON.stringify({ rebalanced: updated }));
 }
 
@@ -986,6 +994,7 @@ async function compact(agentName: string) {
     }
   }
 
+  invalidateLookupCache(db, agentName);
   console.log(JSON.stringify({ compacted: 1, source: compacted.source, signature }));
 }
 
@@ -1030,10 +1039,25 @@ async function extractEntities(agentName: string) {
       stored++;
     }
   }
+  invalidateLookupCache(db, agentName);
   console.log(JSON.stringify({ extracted: stored, consolidated: consolidatedFacts.length, total_entities: result.entities.length, source: result.source }));
 }
 
 async function lookup(agentName: string, query: string, limit = 3, mode: RetrievalMode = "mix") {
+  const nowIso = new Date().toISOString();
+  const cacheKey = buildLookupCacheKey(query, limit, mode);
+  const cached = readLookupCache(db, agentName, cacheKey, nowIso);
+  if (cached) {
+    try {
+      const payload = JSON.parse(cached) as Record<string, unknown>;
+      const currentCache = payload.cache && typeof payload.cache === "object" ? payload.cache as Record<string, unknown> : {};
+      payload.cache = { ...currentCache, hit: true };
+      console.log(JSON.stringify(payload));
+    } catch {
+      console.log(cached);
+    }
+    return;
+  }
   const rows = db.prepare(
     `SELECT si.id, si.record_kind, si.agent_name, si.source_kind, si.content, si.embedding_json,
             COALESCE(a.importance, 'high') AS importance,
@@ -1308,7 +1332,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
        LIMIT ?`,
     ).all(...topCompactionTraceIds, agentName, ...topCompactionTraceIds, Math.max(limit * 2, 4)) as LinkedLookupRow[];
   }
-  console.log(JSON.stringify({
+  const payload = JSON.stringify({
     recentDigests: digests,
     episodic,
     archival,
@@ -1331,7 +1355,18 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
       artifact_count: refreshState?.artifact_count ?? rows.length,
       source: refreshState?.source ?? null,
     },
-  }));
+    cache: {
+      hit: false,
+    },
+  });
+  writeLookupCache(
+    db,
+    agentName,
+    cacheKey,
+    payload,
+    resolveLookupExpiry(Date.now(), stale, refreshState?.last_refresh_at, staleAfterSeconds, lookupCacheTtlSeconds),
+  );
+  console.log(payload);
 }
 
 function invalidate(agentName: string, query: string, relationPrefix: string | null = null) {
@@ -1368,6 +1403,7 @@ function invalidate(agentName: string, query: string, relationPrefix: string | n
   }
   invalidateMemoryFacts(db, agentName, query);
   appendInvalidatedFacts(agentName, query);
+  invalidateLookupCache(db, agentName);
 
   console.log(JSON.stringify({ invalidated, items: items.length, relation_prefix: relationPrefix }));
 }
@@ -1432,6 +1468,7 @@ function timeline(agentName: string, query: string, limit = 12) {
 }
 
 function rebuildMemory(agentName?: string) {
+  invalidateLookupCache(db, agentName);
   const memoryRoot = stateDir("memory");
   const sourceRoot = stateDir("memory-source");
   const discoveredAgents = new Set<string>();

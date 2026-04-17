@@ -76,6 +76,14 @@ export function ensureSchema(db: Database) {
     error_streak INTEGER NOT NULL DEFAULT 0,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
+  db.run(`CREATE TABLE IF NOT EXISTS agent_memory_lookup_cache (
+    agent_name TEXT NOT NULL,
+    cache_key TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(agent_name, cache_key)
+  );`);
   db.run(`CREATE TABLE IF NOT EXISTS agent_memory_compactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_name TEXT NOT NULL,
