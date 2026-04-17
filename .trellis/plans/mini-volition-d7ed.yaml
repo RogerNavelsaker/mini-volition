@@ -2,8 +2,10 @@ id: mini-volition-d7ed
 title: Randomized Cooldown Implementation
 seed: mini-volition-d7ed
 spec: mini-volition-d7ed
-status: active
+status: done
 createdAt: "2026-04-15T20:40:54.299Z"
-updatedAt: "2026-04-15T20:40:54.299Z"
+updatedAt: "2026-04-17T17:23:23.153Z"
+completedAt: "2026-04-17T17:23:23.152Z"
+completionSummary: Implemented randomized cooldown fallback for transient provider-capacity limits. Explicit provider retry/reset windows still take precedence, quota exhaustion remains fixed, and transient fallback now uses a 10-30s randomized refractory window with focused policy tests and successful build validation.
 summary: Plan to address Randomized Cooldown Implementation
 steps:
