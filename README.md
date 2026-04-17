@@ -78,6 +78,10 @@ agent-state rebuild [agent]        # rebuild from state/ JSONL
 agent-state subscription-list <agent>
 agent-state subscription-get <agent> <channel>
 agent-state subscription-set <agent> <channel> <subscribed|unsubscribed> [resumeAt] [note]
+agent-state notification-list <agent>
+agent-state notification-get <agent> <channelName>
+agent-state notification-set <agent> <channelName> <recipient> <layer> [note]
+agent-mail notify <agent> <channelName> <message>
 agent-jobs alarm-set <agent> <alarm|reminder> <message> <dueAt> [sourceJobId]
 agent-jobs alarm-list [agent] [limit]
 agent-jobs alarm-cancel <alarmId> <agent>

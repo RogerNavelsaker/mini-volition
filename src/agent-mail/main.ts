@@ -60,6 +60,7 @@ SQLite mail bus for the fleet. Compiled with Bun, stores state in \`runtime/agen
 ## Commands
 
 - \`agent-mail send <recipient> <layer> "<message>"\` — send a message
+- \`agent-mail notify <agent> <channelName> "<message>"\` — resolve a configured notification route and send to it
 - \`AGENT_NAME=<name> agent-mail listen\` — block until an unread message arrives, print as JSON
 - \`AGENT_NAME=<name> agent-mail listen-burst [limit] [windowSec]\` — claim a same-channel burst of unread messages
 - \`agent-mail tail <layer>\` — stream messages on a layer
@@ -88,6 +89,11 @@ const formatMessage = (msg: FleetMessage) => {
 type SubscriptionState = {
   status: string;
   resume_at: string | null;
+};
+
+type NotificationRoute = {
+  recipient: string;
+  layer: string;
 };
 
 function mailChannelFor(msg: FleetMessage): string | null {
@@ -119,6 +125,13 @@ function subscriptionFilterFor(agent: string): MailFilter {
     const resumeAtMs = new Date(subscription.resume_at.endsWith("Z") ? subscription.resume_at : `${subscription.resume_at}Z`).getTime();
     return !Number.isFinite(resumeAtMs) || resumeAtMs <= now;
   };
+}
+
+function notificationRouteFor(agent: string, channelName: string): NotificationRoute | null {
+  const route = stateDb
+    .prepare("SELECT recipient, layer FROM fleet_notification_channels WHERE agent_name = ? AND channel_name = ? LIMIT 1")
+    .get(agent, channelName) as NotificationRoute | null;
+  return route ? { recipient: String(route.recipient), layer: String(route.layer) } : null;
 }
 
 function stateDir(...parts: string[]) {
@@ -315,6 +328,30 @@ if (cmd === "send") {
     event: "sent",
     message,
   });
+} else if (cmd === "notify") {
+  if (!arg1 || !arg2 || !arg3) {
+    console.error("Usage: agent-mail notify <agent> <channelName> <message>");
+    process.exit(64);
+  }
+  const route = notificationRouteFor(arg1, arg2);
+  if (!route) {
+    console.error(`No notification channel '${arg2}' configured for ${arg1}`);
+    process.exit(1);
+  }
+  await withBusyRetry(() =>
+    db.run(
+      "INSERT INTO fleet_comms (recipient, layer, sender, body) VALUES (?, ?, ?, ?)",
+      [route.recipient, route.layer, sender, arg3],
+    ),
+  );
+  const message = await withBusyRetry(() => db.prepare("SELECT * FROM fleet_comms WHERE id = last_insert_rowid()").get()) as FleetMessage | null;
+  appendMailArtifact(route.recipient, {
+    record_type: "message",
+    event: "sent",
+    notification_agent: arg1,
+    notification_channel: arg2,
+    message,
+  });
 } else if (cmd === "listen") {
   while (true) {
     const burst = await withBusyRetry(() => claimBurst(db, sender, 1, 0, undefined, subscriptionFilterFor(sender)));
@@ -466,7 +503,7 @@ if (cmd === "send") {
   console.log(SKILL);
 } else {
   console.error(
-    "Usage: agent-mail send <recipient> <layer> <message> | agent-mail listen | agent-mail listen-burst [limit] [windowSec] | agent-mail peek-burst [limit] [windowSec] | agent-mail claim-burst [limit] [windowSec] [primaryId] | agent-mail complete-burst <messageId...> | agent-mail reclaim-stale [ttlMs] | agent-mail release-claim <messageId...> | agent-mail claims [limit] | agent-mail rebuild | agent-mail verify | agent-mail tail <layer> | agent-mail skill",
+    "Usage: agent-mail send <recipient> <layer> <message> | agent-mail notify <agent> <channelName> <message> | agent-mail listen | agent-mail listen-burst [limit] [windowSec] | agent-mail peek-burst [limit] [windowSec] | agent-mail claim-burst [limit] [windowSec] [primaryId] | agent-mail complete-burst <messageId...> | agent-mail reclaim-stale [ttlMs] | agent-mail release-claim <messageId...> | agent-mail claims [limit] | agent-mail rebuild | agent-mail verify | agent-mail tail <layer> | agent-mail skill",
   );
   process.exit(64);
 }

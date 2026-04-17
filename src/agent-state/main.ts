@@ -114,7 +114,7 @@ function validateRuntimeTransition(previous: RuntimeStatus | null, next: Runtime
 }
 
 function usage(): never {
-  console.error("Usage: agent-state <get|set|subscription-get|subscription-set|subscription-list|proposal-create|proposal-get|proposal-list|vote-cast|vote-list|ghost-get|ghost-set|ghost-clear|record-action|record-actions-batch|record-turn-events-batch|rebuild|verify|list-actions|list-turns|list-checkpoints|get-checkpoint|recover-turns|review-turns|resolve-turn|replay-turn> ...");
+  console.error("Usage: agent-state <get|set|subscription-get|subscription-set|subscription-list|notification-get|notification-set|notification-list|proposal-create|proposal-get|proposal-list|vote-cast|vote-list|ghost-get|ghost-set|ghost-clear|record-action|record-actions-batch|record-turn-events-batch|rebuild|verify|list-actions|list-turns|list-checkpoints|get-checkpoint|recover-turns|review-turns|resolve-turn|replay-turn> ...");
   process.exit(64);
 }
 
@@ -150,6 +150,7 @@ function rebuildState(agent?: string) {
       db.prepare("DELETE FROM fleet_turn_journal WHERE agent_name = ?").run(name);
       db.prepare("DELETE FROM fleet_turn_checkpoints WHERE agent_name = ?").run(name);
       db.prepare("DELETE FROM fleet_channel_subscriptions WHERE agent_name = ?").run(name);
+      db.prepare("DELETE FROM fleet_notification_channels WHERE agent_name = ?").run(name);
       db.prepare("DELETE FROM fleet_consensus_votes WHERE voter_agent = ?").run(name);
       db.prepare("DELETE FROM fleet_consensus_proposals WHERE proposer_agent = ?").run(name);
       db.prepare("DELETE FROM fleet_agent_ghosts WHERE agent_name = ?").run(name);
@@ -332,7 +333,26 @@ function rebuildState(agent?: string) {
       }
       for (const row of runtimeRows) {
         const ts = String(row.recorded_at ?? new Date().toISOString());
-        if (row.record_type === "ghost_state") {
+        if (row.record_type === "notification_channel") {
+          db.prepare(
+            `INSERT INTO fleet_notification_channels (
+               agent_name, channel_name, recipient, layer, note, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(agent_name, channel_name) DO UPDATE SET
+               recipient = excluded.recipient,
+               layer = excluded.layer,
+               note = excluded.note,
+               updated_at = excluded.updated_at`,
+          ).run(
+            name,
+            String(row.channel_name ?? ""),
+            String(row.recipient ?? ""),
+            String(row.layer ?? "urgent"),
+            row.note ?? null,
+            row.created_at ?? ts,
+            ts,
+          );
+        } else if (row.record_type === "ghost_state") {
           db.prepare(
             `INSERT INTO fleet_agent_ghosts (
                agent_name, turn_key, wake_source, wake_reason, message_id, failure_kind, detail, checkpoint_status, created_at, updated_at
@@ -408,6 +428,13 @@ function verifyState(agent?: string) {
     }
     const expectedSubscriptions = latestSubscriptions.size;
     const actualSubscriptionCount = Number((db.prepare("SELECT COUNT(*) AS count FROM fleet_channel_subscriptions WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0);
+    const latestNotificationChannels = new Map<string, Record<string, unknown>>();
+    for (const row of readJsonl(stateDir("runtime", `${name}.jsonl`))) {
+      if (row.record_type !== "notification_channel") continue;
+      latestNotificationChannels.set(String(row.channel_name ?? ""), row);
+    }
+    const expectedNotificationChannels = latestNotificationChannels.size;
+    const actualNotificationChannelCount = Number((db.prepare("SELECT COUNT(*) AS count FROM fleet_notification_channels WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0);
     const latestProposals = new Map<number, Record<string, unknown>>();
     let expectedVoteCount = 0;
     for (const row of readJsonl(stateDir("runtime", `${name}.jsonl`))) {
@@ -472,6 +499,7 @@ function verifyState(agent?: string) {
       actualPhaseCount !== expectedPhaseCount ? `turn-phase count drift: expected ${expectedPhaseCount}, actual ${actualPhaseCount}` : null,
       actualCheckpointCount !== expectedCheckpointCount ? `checkpoint count drift: expected ${expectedCheckpointCount}, actual ${actualCheckpointCount}` : null,
       actualSubscriptionCount !== expectedSubscriptions ? `subscription count drift: expected ${expectedSubscriptions}, actual ${actualSubscriptionCount}` : null,
+      actualNotificationChannelCount !== expectedNotificationChannels ? `notification channel drift: expected ${expectedNotificationChannels}, actual ${actualNotificationChannelCount}` : null,
       actualProposalCount !== expectedProposalCount ? `proposal count drift: expected ${expectedProposalCount}, actual ${actualProposalCount}` : null,
       actualVoteCount !== expectedVoteCount ? `vote count drift: expected ${expectedVoteCount}, actual ${actualVoteCount}` : null,
       (!!expectedGhost) !== (!!actualGhost) ? `ghost state drift: expected ${expectedGhost ? "present" : "absent"}, actual ${actualGhost ? "present" : "absent"}` : null,
@@ -484,6 +512,7 @@ function verifyState(agent?: string) {
         && actualPhaseCount === expectedPhaseCount
         && actualCheckpointCount === expectedCheckpointCount
         && actualSubscriptionCount === expectedSubscriptions
+        && actualNotificationChannelCount === expectedNotificationChannels
         && actualProposalCount === expectedProposalCount
         && actualVoteCount === expectedVoteCount
         && (!!expectedGhost) === (!!actualGhost)
@@ -501,6 +530,7 @@ function verifyState(agent?: string) {
         turn_phases: actualPhaseCount,
         checkpoints: actualCheckpointCount,
         subscriptions: actualSubscriptionCount,
+        notification_channels: actualNotificationChannelCount,
         proposals: actualProposalCount,
         votes: actualVoteCount,
         ghost_present: !!actualGhost,
@@ -579,8 +609,18 @@ function ensureSchema() {
     resume_at DATETIME,
     note TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+     PRIMARY KEY (agent_name, channel)
+  );`);
+  db.run(`CREATE TABLE IF NOT EXISTS fleet_notification_channels (
+    agent_name TEXT NOT NULL,
+    channel_name TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    layer TEXT NOT NULL,
+    note TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (agent_name, channel)
+    PRIMARY KEY (agent_name, channel_name)
   );`);
   db.run(`CREATE TABLE IF NOT EXISTS fleet_consensus_proposals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -961,6 +1001,51 @@ if (cmd === "get") {
   }
   const result = db
     .prepare("SELECT agent_name, channel, status, resume_at, note, created_at, updated_at FROM fleet_channel_subscriptions WHERE agent_name = ? ORDER BY channel ASC")
+    .all(arg1);
+  console.log(JSON.stringify(result));
+} else if (cmd === "notification-get") {
+  if (!arg1 || !arg2) {
+    console.error("Usage: agent-state notification-get <agent> <channelName>");
+    process.exit(64);
+  }
+  const result = db
+    .prepare("SELECT agent_name, channel_name, recipient, layer, note, created_at, updated_at FROM fleet_notification_channels WHERE agent_name = ? AND channel_name = ? LIMIT 1")
+    .get(arg1, arg2);
+  console.log(JSON.stringify(result ?? null));
+} else if (cmd === "notification-set") {
+  if (!arg1 || !arg2 || !Bun.argv[5] || !Bun.argv[6]) {
+    console.error("Usage: agent-state notification-set <agent> <channelName> <recipient> <layer> [note]");
+    process.exit(64);
+  }
+  const note = nullableArg(Bun.argv[7]);
+  db.run(
+    `INSERT INTO fleet_notification_channels (agent_name, channel_name, recipient, layer, note, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(agent_name, channel_name) DO UPDATE SET
+       recipient = excluded.recipient,
+       layer = excluded.layer,
+       note = excluded.note,
+       updated_at = CURRENT_TIMESTAMP`,
+    [arg1, arg2, Bun.argv[5], Bun.argv[6], note],
+  );
+  appendRuntimeArtifact(arg1, {
+    record_type: "notification_channel",
+    channel_name: arg2,
+    recipient: Bun.argv[5],
+    layer: Bun.argv[6],
+    note,
+  });
+  const notification = db
+    .prepare("SELECT agent_name, channel_name, recipient, layer, note, created_at, updated_at FROM fleet_notification_channels WHERE agent_name = ? AND channel_name = ? LIMIT 1")
+    .get(arg1, arg2);
+  console.log(JSON.stringify(notification ?? null));
+} else if (cmd === "notification-list") {
+  if (!arg1) {
+    console.error("Usage: agent-state notification-list <agent>");
+    process.exit(64);
+  }
+  const result = db
+    .prepare("SELECT agent_name, channel_name, recipient, layer, note, created_at, updated_at FROM fleet_notification_channels WHERE agent_name = ? ORDER BY channel_name ASC")
     .all(arg1);
   console.log(JSON.stringify(result));
 } else if (cmd === "proposal-create") {
