@@ -243,6 +243,66 @@ function setRuntimeState(
   }
 }
 
+function readGhostedTurn(): GhostedTurn | null {
+  return (runJsonCommand("agent-state", ["ghost-get", name!]) ?? null) as GhostedTurn | null;
+}
+
+function recordGhostedTurn(
+  turnKey: string,
+  wake: WakeEvent,
+  failureKind: string,
+  detail: string,
+  checkpointStatus: string | null = null,
+) {
+  try {
+    execFileSync(
+      "agent-state",
+      [
+        "ghost-set",
+        name!,
+        turnKey,
+        wake.source,
+        wake.wakeReason,
+        failureKind,
+        String(wake.burst.primary.id),
+        detail,
+        checkpointStatus ?? "",
+      ],
+      { stdio: "ignore" },
+    );
+  } catch (e) {
+    console.error(`Failed to record ghosted turn for ${name}`, e);
+  }
+}
+
+function clearGhostedTurn() {
+  try {
+    execFileSync("agent-state", ["ghost-clear", name!], { stdio: "ignore" });
+  } catch (e) {
+    console.error(`Failed to clear ghosted turn for ${name}`, e);
+  }
+}
+
+function formatGhostOrientation(ghost: GhostedTurn): string {
+  const lines = [
+    `§ORIENTATION ! ALERT: AgentGhosted`,
+    `- previous_turn=${ghost.turn_key}`,
+    `- failure_kind=${ghost.failure_kind}`,
+    `- wake_source=${ghost.wake_source}`,
+    `- wake_reason=${ghost.wake_reason}`,
+  ];
+  if (ghost.message_id != null) lines.push(`- message_id=${ghost.message_id}`);
+  if (ghost.checkpoint_status) lines.push(`- checkpoint_status=${ghost.checkpoint_status}`);
+  if (ghost.last_action) {
+    lines.push(`- last_action=${ghost.last_action.action_type} phase=${ghost.last_action.phase}${ghost.last_action.detail ? ` detail=${ghost.last_action.detail}` : ""}`);
+  } else {
+    lines.push(`- last_action=(none recorded before failure)`);
+  }
+  if (ghost.detail) lines.push(`- detail=${ghost.detail}`);
+  lines.push(`Acknowledge this failure in your first reasoning block, then continue the turn.`);
+  return lines.join("\n");
+}
+
 function readGovernor(windowSec = 120, turnLimit = 4): { allowed: boolean; forced_cooldown_until?: string | null } {
   return (runJsonCommand("fleet", ["governor-status", name!, String(windowSec), String(turnLimit)]) ?? { allowed: true }) as { allowed: boolean; forced_cooldown_until?: string | null };
 }
@@ -299,6 +359,7 @@ type ActionEnvelope = {
 type ValidatedEnvelope = { ok: true; envelope: ActionEnvelope } | { ok: false; error: string };
 type TurnAssembly = {
   inboundBurstText: string;
+  orientationAlert: string | null;
   sleepDeltaSeconds: number;
   recentDigests: Array<{ id?: number; summary: string }>;
   episodic: Array<{ id?: number; summary: string }>;
@@ -342,6 +403,24 @@ type TurnAssembly = {
   recalledArtifactIds: number[];
   scratchpad: string;
   scratchpadStatus: { chars: number; cap: number; ratio: number; warning: string };
+};
+type GhostedTurn = {
+  agent_name: string;
+  turn_key: string;
+  wake_source: string;
+  wake_reason: string;
+  message_id: number | null;
+  failure_kind: string;
+  detail: string | null;
+  checkpoint_status: string | null;
+  last_action?: {
+    action_type: string;
+    phase: string;
+    detail: string | null;
+    replay_disposition: string | null;
+    replay_reason: string | null;
+    created_at: string;
+  } | null;
 };
 type InternalJob = {
   id: number;
@@ -1825,9 +1904,11 @@ async function assembleTurnContext(agentName: string, burst: IncomingBurst, wake
     .filter((id) => Number.isInteger(id) && id > 0);
 
   const scratchpad = readScratchpad(agentName);
+  const ghost = readGhostedTurn();
 
   return {
     inboundBurstText,
+    orientationAlert: ghost ? formatGhostOrientation(ghost) : null,
     sleepDeltaSeconds,
     recentDigests,
     episodic,
@@ -1934,7 +2015,7 @@ function renderTurnPrompt(agentName: string, burst: IncomingBurst, turn: TurnAss
   const traceLines = budgetSection(traceTable ? traceTable.split("\n") : [], BUDGET_TRACE_CHARS);
 
   return `§TURN agent=${agentName}
-§LTM
+${turn.orientationAlert ? `${turn.orientationAlert}\n` : ""}§LTM
 ${archivalLines.length ? archivalLines.join("\n") : "- (none)"}
 §FACTS
 ${factLines.length ? factLines.join("\n") : "- (none)"}
@@ -2524,6 +2605,7 @@ async function processWakeEvent(
         envelope_status: "provider_error",
         envelope_summary: null,
       });
+      recordGhostedTurn(turnKey, wake, deadmanTriggered ? "deadman" : "provider_error", errorText, "provider_error");
       recordBufferedTurnPhase("failed", errorText);
       flushTurnEventBatch(bufferedTurnPhases, bufferedTurnCheckpoints);
       setRuntimeState("error", currentTask, "provider_error", errorText, null, String(msg.id));
@@ -2594,6 +2676,7 @@ async function processWakeEvent(
           options?.successCooldownUntil ?? null,
           String(msg.id),
         );
+        clearGhostedTurn();
       } else {
         recordBufferedTurnCheckpoint({
           turn_key: turnKey,
@@ -2622,6 +2705,7 @@ async function processWakeEvent(
           options?.successCooldownUntil ?? null,
           String(msg.id),
         );
+        clearGhostedTurn();
       }
     }
 
@@ -2646,6 +2730,7 @@ async function processWakeEvent(
       envelope_status: "turn_crash",
       envelope_summary: null,
     });
+    recordGhostedTurn(turnKey, wake, "turn_crash", errorText, "turn_crash");
     recordBufferedTurnPhase("failed", errorText);
     flushTurnEventBatch(bufferedTurnPhases, bufferedTurnCheckpoints);
     setRuntimeState("error", currentTask, "turn_crash", errorText, null, String(msg.id));
@@ -2661,6 +2746,25 @@ async function runWorker() {
   const recoveredTurns = recoverInterruptedTurns(runStateQuery, runStateInsert, name!, turnStaleMs);
   for (const turn of recoveredTurns.turns) {
     if (!turn.message_id) continue;
+    try {
+      execFileSync(
+        "agent-state",
+        [
+          "ghost-set",
+          name!,
+          turn.turn_key,
+          turn.wake_source,
+          turn.wake_reason,
+          turn.replay_disposition === "safe" ? "interrupted_recovered" : "interrupted_manual_review",
+          String(turn.message_id),
+          turn.detail ?? "",
+          "started",
+        ],
+        { stdio: "ignore" },
+      );
+    } catch (e) {
+      console.error(`Failed to persist recovered ghost state for ${name}`, e);
+    }
     if (turn.replay_disposition !== "safe") {
       sendMessage("operator", "urgent", `[RECOVERY REVIEW] ${name} turn ${turn.turn_key} requires manual review before replay: ${turn.detail ?? "unknown recovery risk"}`);
       recordWorking("system", `Manual review required for interrupted turn ${turn.turn_key}`);

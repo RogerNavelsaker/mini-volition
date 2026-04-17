@@ -114,7 +114,7 @@ function validateRuntimeTransition(previous: RuntimeStatus | null, next: Runtime
 }
 
 function usage(): never {
-  console.error("Usage: agent-state <get|set|subscription-get|subscription-set|subscription-list|proposal-create|proposal-get|proposal-list|vote-cast|vote-list|record-action|record-actions-batch|record-turn-events-batch|rebuild|verify|list-actions|list-turns|list-checkpoints|get-checkpoint|recover-turns|review-turns|resolve-turn|replay-turn> ...");
+  console.error("Usage: agent-state <get|set|subscription-get|subscription-set|subscription-list|proposal-create|proposal-get|proposal-list|vote-cast|vote-list|ghost-get|ghost-set|ghost-clear|record-action|record-actions-batch|record-turn-events-batch|rebuild|verify|list-actions|list-turns|list-checkpoints|get-checkpoint|recover-turns|review-turns|resolve-turn|replay-turn> ...");
   process.exit(64);
 }
 
@@ -152,6 +152,7 @@ function rebuildState(agent?: string) {
       db.prepare("DELETE FROM fleet_channel_subscriptions WHERE agent_name = ?").run(name);
       db.prepare("DELETE FROM fleet_consensus_votes WHERE voter_agent = ?").run(name);
       db.prepare("DELETE FROM fleet_consensus_proposals WHERE proposer_agent = ?").run(name);
+      db.prepare("DELETE FROM fleet_agent_ghosts WHERE agent_name = ?").run(name);
 
       const runtimeRows = readJsonl(stateDir("runtime", `${name}.jsonl`));
       const actionRows = readJsonl(stateDir("actions", `${name}.jsonl`));
@@ -329,6 +330,38 @@ function rebuildState(agent?: string) {
           );
         }
       }
+      for (const row of runtimeRows) {
+        const ts = String(row.recorded_at ?? new Date().toISOString());
+        if (row.record_type === "ghost_state") {
+          db.prepare(
+            `INSERT INTO fleet_agent_ghosts (
+               agent_name, turn_key, wake_source, wake_reason, message_id, failure_kind, detail, checkpoint_status, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(agent_name) DO UPDATE SET
+               turn_key = excluded.turn_key,
+               wake_source = excluded.wake_source,
+               wake_reason = excluded.wake_reason,
+               message_id = excluded.message_id,
+               failure_kind = excluded.failure_kind,
+               detail = excluded.detail,
+               checkpoint_status = excluded.checkpoint_status,
+               updated_at = excluded.updated_at`,
+          ).run(
+            name,
+            String(row.turn_key ?? ""),
+            String(row.wake_source ?? ""),
+            String(row.wake_reason ?? ""),
+            row.message_id ?? null,
+            String(row.failure_kind ?? "ghosted"),
+            row.detail ?? null,
+            row.checkpoint_status ?? null,
+            row.created_at ?? ts,
+            ts,
+          );
+        } else if (row.record_type === "ghost_clear") {
+          db.prepare("DELETE FROM fleet_agent_ghosts WHERE agent_name = ?").run(name);
+        }
+      }
 
       summary.push({
         agent: name,
@@ -388,6 +421,14 @@ function verifyState(agent?: string) {
     const expectedProposalCount = latestProposals.size;
     const actualProposalCount = Number((db.prepare("SELECT COUNT(*) AS count FROM fleet_consensus_proposals WHERE proposer_agent = ?").get(name) as { count: number } | null)?.count ?? 0);
     const actualVoteCount = Number((db.prepare("SELECT COUNT(*) AS count FROM fleet_consensus_votes WHERE voter_agent = ?").get(name) as { count: number } | null)?.count ?? 0);
+    let expectedGhost: Record<string, unknown> | null = null;
+    for (const row of readJsonl(stateDir("runtime", `${name}.jsonl`))) {
+      if (row.record_type === "ghost_state") expectedGhost = row;
+      else if (row.record_type === "ghost_clear") expectedGhost = null;
+    }
+    const actualGhost = db.prepare(
+      "SELECT turn_key, wake_source, wake_reason, message_id, failure_kind, detail, checkpoint_status FROM fleet_agent_ghosts WHERE agent_name = ? LIMIT 1",
+    ).get(name) as Record<string, unknown> | null;
     const runtimeDrift = expectedRuntime
       ? {
           status: expectedRuntime.status !== actualRuntime?.status,
@@ -433,6 +474,7 @@ function verifyState(agent?: string) {
       actualSubscriptionCount !== expectedSubscriptions ? `subscription count drift: expected ${expectedSubscriptions}, actual ${actualSubscriptionCount}` : null,
       actualProposalCount !== expectedProposalCount ? `proposal count drift: expected ${expectedProposalCount}, actual ${actualProposalCount}` : null,
       actualVoteCount !== expectedVoteCount ? `vote count drift: expected ${expectedVoteCount}, actual ${actualVoteCount}` : null,
+      (!!expectedGhost) !== (!!actualGhost) ? `ghost state drift: expected ${expectedGhost ? "present" : "absent"}, actual ${actualGhost ? "present" : "absent"}` : null,
       runtimeDrift && Object.entries(runtimeDrift).filter(([, drift]) => drift).map(([field]) => `runtime field drift: ${field}`).join(", "),
       ...actionContentDrift.map((d) => `action content drift: ${d}`),
     ].filter(Boolean);
@@ -444,6 +486,7 @@ function verifyState(agent?: string) {
         && actualSubscriptionCount === expectedSubscriptions
         && actualProposalCount === expectedProposalCount
         && actualVoteCount === expectedVoteCount
+        && (!!expectedGhost) === (!!actualGhost)
         && (!runtimeDrift || !Object.values(runtimeDrift).some(Boolean))
         && actionContentDrift.length === 0,
       expected: {
@@ -460,6 +503,7 @@ function verifyState(agent?: string) {
         subscriptions: actualSubscriptionCount,
         proposals: actualProposalCount,
         votes: actualVoteCount,
+        ghost_present: !!actualGhost,
       },
       runtime_drift: runtimeDrift,
       runtime_drift_detail: Object.keys(runtimeDriftDetail).length > 0 ? runtimeDriftDetail : null,
@@ -557,6 +601,18 @@ function ensureSchema() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(proposal_id, voter_agent)
+  );`);
+  db.run(`CREATE TABLE IF NOT EXISTS fleet_agent_ghosts (
+    agent_name TEXT PRIMARY KEY,
+    turn_key TEXT NOT NULL,
+    wake_source TEXT NOT NULL,
+    wake_reason TEXT NOT NULL,
+    message_id INTEGER,
+    failure_kind TEXT NOT NULL,
+    detail TEXT,
+    checkpoint_status TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
 }
 
@@ -989,6 +1045,75 @@ if (cmd === "get") {
   const proposalId = Number(arg1);
   const result = db.prepare("SELECT * FROM fleet_consensus_votes WHERE proposal_id = ? ORDER BY voter_agent ASC").all(proposalId);
   console.log(JSON.stringify(result));
+} else if (cmd === "ghost-get") {
+  if (!arg1) {
+    console.error("Usage: agent-state ghost-get <agent>");
+    process.exit(64);
+  }
+  const ghost = db.prepare(
+    `SELECT agent_name, turn_key, wake_source, wake_reason, message_id, failure_kind, detail, checkpoint_status, created_at, updated_at
+     FROM fleet_agent_ghosts
+     WHERE agent_name = ?
+     LIMIT 1`,
+  ).get(arg1) as Record<string, unknown> | null;
+  if (!ghost) {
+    console.log("null");
+    process.exit(0);
+  }
+  const lastAction = (ghost.message_id == null)
+    ? null
+    : db.prepare(
+        `SELECT action_type, phase, detail, replay_disposition, replay_reason, created_at
+         FROM fleet_agent_action_journal
+         WHERE agent_name = ?
+           AND message_id = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+      ).get(arg1, ghost.message_id);
+  console.log(JSON.stringify({ ...ghost, last_action: lastAction ?? null }));
+} else if (cmd === "ghost-set") {
+  if (!arg1 || !arg2 || !Bun.argv[5] || !Bun.argv[6] || !Bun.argv[7]) {
+    console.error("Usage: agent-state ghost-set <agent> <turnKey> <wakeSource> <wakeReason> <failureKind> [messageId] [detail] [checkpointStatus]");
+    process.exit(64);
+  }
+  const messageId = nullableArg(Bun.argv[8]) ? Number(Bun.argv[8]) : null;
+  const detail = nullableArg(Bun.argv[9]);
+  const checkpointStatus = nullableArg(Bun.argv[10]);
+  db.run(
+    `INSERT INTO fleet_agent_ghosts (
+       agent_name, turn_key, wake_source, wake_reason, message_id, failure_kind, detail, checkpoint_status, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(agent_name) DO UPDATE SET
+       turn_key = excluded.turn_key,
+       wake_source = excluded.wake_source,
+       wake_reason = excluded.wake_reason,
+       message_id = excluded.message_id,
+       failure_kind = excluded.failure_kind,
+       detail = excluded.detail,
+       checkpoint_status = excluded.checkpoint_status,
+       updated_at = CURRENT_TIMESTAMP`,
+    [arg1, arg2, Bun.argv[5], Bun.argv[6], messageId, Bun.argv[7], detail, checkpointStatus],
+  );
+  appendRuntimeArtifact(arg1, {
+    record_type: "ghost_state",
+    turn_key: arg2,
+    wake_source: Bun.argv[5],
+    wake_reason: Bun.argv[6],
+    message_id: messageId,
+    failure_kind: Bun.argv[7],
+    detail,
+    checkpoint_status: checkpointStatus,
+  });
+  const ghost = db.prepare("SELECT * FROM fleet_agent_ghosts WHERE agent_name = ? LIMIT 1").get(arg1);
+  console.log(JSON.stringify(ghost ?? null));
+} else if (cmd === "ghost-clear") {
+  if (!arg1) {
+    console.error("Usage: agent-state ghost-clear <agent>");
+    process.exit(64);
+  }
+  db.run("DELETE FROM fleet_agent_ghosts WHERE agent_name = ?", [arg1]);
+  appendRuntimeArtifact(arg1, { record_type: "ghost_clear" });
+  console.log(JSON.stringify({ agent_name: arg1, cleared: true }));
 } else if (cmd === "record-action") {
   if (!arg1 || !arg2 || !Bun.argv[5] || !Bun.argv[6]) {
     console.error("Usage: agent-state record-action <agent> <actionType> <actionIndex> <phase> [detail] [messageId] [replayDisposition] [replayReason]");
