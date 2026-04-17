@@ -35,7 +35,7 @@ const [, , cmd, arg1, arg2] = Bun.argv;
 const nullableArg = (value: string | undefined | null) => (value === undefined || value === null || value === "" ? null : value);
 
 function usage(): never {
-  console.error("Usage: agent-state <get|set|record-action|record-actions-batch|record-turn-events-batch|rebuild|verify|list-actions|list-turns|list-checkpoints|get-checkpoint|recover-turns|review-turns|resolve-turn|replay-turn> ...");
+  console.error("Usage: agent-state <get|set|subscription-get|subscription-set|subscription-list|record-action|record-actions-batch|record-turn-events-batch|rebuild|verify|list-actions|list-turns|list-checkpoints|get-checkpoint|recover-turns|review-turns|resolve-turn|replay-turn> ...");
   process.exit(64);
 }
 
@@ -70,6 +70,7 @@ function rebuildState(agent?: string) {
       db.prepare("DELETE FROM fleet_agent_action_journal WHERE agent_name = ?").run(name);
       db.prepare("DELETE FROM fleet_turn_journal WHERE agent_name = ?").run(name);
       db.prepare("DELETE FROM fleet_turn_checkpoints WHERE agent_name = ?").run(name);
+      db.prepare("DELETE FROM fleet_channel_subscriptions WHERE agent_name = ?").run(name);
 
       const runtimeRows = readJsonl(stateDir("runtime", `${name}.jsonl`));
       const actionRows = readJsonl(stateDir("actions", `${name}.jsonl`));
@@ -140,6 +141,16 @@ function rebuildState(agent?: string) {
            envelope_summary = excluded.envelope_summary,
            updated_at = excluded.updated_at`,
       );
+      const upsertSubscription = db.prepare(
+        `INSERT INTO fleet_channel_subscriptions (
+           agent_name, channel, status, resume_at, note, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(agent_name, channel) DO UPDATE SET
+           status = excluded.status,
+           resume_at = excluded.resume_at,
+           note = excluded.note,
+           updated_at = excluded.updated_at`,
+      );
       for (const row of turnRows) {
         if (row.record_type === "phase") {
           insertTurnPhase.run(
@@ -173,6 +184,19 @@ function rebuildState(agent?: string) {
             ts,
           );
         }
+      }
+      for (const row of runtimeRows) {
+        if (row.record_type !== "subscription_state") continue;
+        const ts = String(row.recorded_at ?? new Date().toISOString());
+        upsertSubscription.run(
+          name,
+          String(row.channel ?? ""),
+          String(row.status ?? "subscribed"),
+          row.resume_at ?? null,
+          row.note ?? null,
+          ts,
+          ts,
+        );
       }
 
       summary.push({
@@ -213,6 +237,13 @@ function verifyState(agent?: string) {
     const actualActionCount = Number((db.prepare("SELECT COUNT(*) AS count FROM fleet_agent_action_journal WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0);
     const actualPhaseCount = Number((db.prepare("SELECT COUNT(*) AS count FROM fleet_turn_journal WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0);
     const actualCheckpointCount = Number((db.prepare("SELECT COUNT(*) AS count FROM fleet_turn_checkpoints WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0);
+    const latestSubscriptions = new Map<string, Record<string, unknown>>();
+    for (const row of readJsonl(stateDir("runtime", `${name}.jsonl`))) {
+      if (row.record_type !== "subscription_state") continue;
+      latestSubscriptions.set(String(row.channel ?? ""), row);
+    }
+    const expectedSubscriptions = latestSubscriptions.size;
+    const actualSubscriptionCount = Number((db.prepare("SELECT COUNT(*) AS count FROM fleet_channel_subscriptions WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0);
     const runtimeDrift = expectedRuntime
       ? {
           status: expectedRuntime.status !== actualRuntime?.status,
@@ -255,6 +286,7 @@ function verifyState(agent?: string) {
       actualActionCount !== actionRows.length ? `action count drift: expected ${actionRows.length}, actual ${actualActionCount}` : null,
       actualPhaseCount !== expectedPhaseCount ? `turn-phase count drift: expected ${expectedPhaseCount}, actual ${actualPhaseCount}` : null,
       actualCheckpointCount !== expectedCheckpointCount ? `checkpoint count drift: expected ${expectedCheckpointCount}, actual ${actualCheckpointCount}` : null,
+      actualSubscriptionCount !== expectedSubscriptions ? `subscription count drift: expected ${expectedSubscriptions}, actual ${actualSubscriptionCount}` : null,
       runtimeDrift && Object.entries(runtimeDrift).filter(([, drift]) => drift).map(([field]) => `runtime field drift: ${field}`).join(", "),
       ...actionContentDrift.map((d) => `action content drift: ${d}`),
     ].filter(Boolean);
@@ -263,6 +295,7 @@ function verifyState(agent?: string) {
       ok: issues.length === 0 && actualActionCount === actionRows.length
         && actualPhaseCount === expectedPhaseCount
         && actualCheckpointCount === expectedCheckpointCount
+        && actualSubscriptionCount === expectedSubscriptions
         && (!runtimeDrift || !Object.values(runtimeDrift).some(Boolean))
         && actionContentDrift.length === 0,
       expected: {
@@ -276,6 +309,7 @@ function verifyState(agent?: string) {
         actions: actualActionCount,
         turn_phases: actualPhaseCount,
         checkpoints: actualCheckpointCount,
+        subscriptions: actualSubscriptionCount,
       },
       runtime_drift: runtimeDrift,
       runtime_drift_detail: Object.keys(runtimeDriftDetail).length > 0 ? runtimeDriftDetail : null,
@@ -343,6 +377,16 @@ function ensureSchema() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(agent_name, turn_key)
+  );`);
+  db.run(`CREATE TABLE IF NOT EXISTS fleet_channel_subscriptions (
+    agent_name TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    status TEXT NOT NULL,
+    resume_at DATETIME,
+    note TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (agent_name, channel)
   );`);
 }
 
@@ -625,6 +669,53 @@ if (cmd === "get") {
     cooldown_until: nullableArg(Bun.argv[8]),
     last_message_id: nullableArg(Bun.argv[9]) ? Number(Bun.argv[9]) : null,
   });
+} else if (cmd === "subscription-get") {
+  if (!arg1 || !arg2) {
+    console.error("Usage: agent-state subscription-get <agent> <channel>");
+    process.exit(64);
+  }
+  const result = db
+    .prepare("SELECT agent_name, channel, status, resume_at, note, created_at, updated_at FROM fleet_channel_subscriptions WHERE agent_name = ? AND channel = ? LIMIT 1")
+    .get(arg1, arg2);
+  console.log(JSON.stringify(result ?? null));
+} else if (cmd === "subscription-set") {
+  if (!arg1 || !arg2 || !Bun.argv[5]) {
+    console.error("Usage: agent-state subscription-set <agent> <channel> <subscribed|unsubscribed> [resumeAt] [note]");
+    process.exit(64);
+  }
+  const status = Bun.argv[5];
+  if (status !== "subscribed" && status !== "unsubscribed") {
+    console.error("subscription status must be subscribed or unsubscribed");
+    process.exit(64);
+  }
+  const resumeAt = nullableArg(Bun.argv[6]);
+  const note = nullableArg(Bun.argv[7]);
+  db.run(
+    `INSERT INTO fleet_channel_subscriptions (agent_name, channel, status, resume_at, note, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(agent_name, channel) DO UPDATE SET
+       status = excluded.status,
+       resume_at = excluded.resume_at,
+       note = excluded.note,
+       updated_at = CURRENT_TIMESTAMP`,
+    [arg1, arg2, status, resumeAt, note],
+  );
+  appendRuntimeArtifact(arg1, {
+    record_type: "subscription_state",
+    channel: arg2,
+    status,
+    resume_at: resumeAt,
+    note,
+  });
+} else if (cmd === "subscription-list") {
+  if (!arg1) {
+    console.error("Usage: agent-state subscription-list <agent>");
+    process.exit(64);
+  }
+  const result = db
+    .prepare("SELECT agent_name, channel, status, resume_at, note, created_at, updated_at FROM fleet_channel_subscriptions WHERE agent_name = ? ORDER BY channel ASC")
+    .all(arg1);
+  console.log(JSON.stringify(result));
 } else if (cmd === "record-action") {
   if (!arg1 || !arg2 || !Bun.argv[5] || !Bun.argv[6]) {
     console.error("Usage: agent-state record-action <agent> <actionType> <actionIndex> <phase> [detail] [messageId] [replayDisposition] [replayReason]");
