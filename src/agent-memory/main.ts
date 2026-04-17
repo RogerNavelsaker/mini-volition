@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { createConnection } from "net";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
+import { selectCompactionCandidates } from "./compaction";
 import { relationForItemKinds, upsertMemoryLink, invalidateMemoryLinks, timelineQueryTokens } from "./links";
 import { deriveFacts, invalidateMemoryFacts, matchEntityToItem, upsertMemoryFact } from "./facts";
 import { ensureSchema } from "./schema";
@@ -120,6 +121,7 @@ function calculateDecayScore(daysSinceAccess: number, accessCount: number, impor
 
 function classifyImportance(kind: MemoryKind): string {
   if (kind === "archival") return "high";
+  if (kind === "verbatim") return "normal";
   if (kind === "episodic") return "normal";
   return "low";
 }
@@ -368,7 +370,7 @@ function snapshotLink(id: number) {
 
 function requestCompact(entries: string[], goal: string): Promise<CompactResponse> {
   return new Promise((resolve, reject) => {
-    const socket = createConnection(e4bSocket);
+    const socket = createConnection(heavySocket);
     let buffer = "";
     let settled = false;
     const finish = (fn: () => void) => {
@@ -486,6 +488,13 @@ async function refresh(agentName: string) {
      ORDER BY id DESC
      LIMIT 24`,
   ).all(agentName) as Array<{ id: number; content: string }>;
+  const verbatimRows = db.prepare(
+    `SELECT id, content
+     FROM tier0_verbatim
+     WHERE agent_name = ?
+     ORDER BY id DESC
+     LIMIT 24`,
+  ).all(agentName) as Array<{ id: number; content: string }>;
   const archivalRows = db.prepare(
     `SELECT id, reflection AS content
      FROM tier3_archival
@@ -497,6 +506,7 @@ async function refresh(agentName: string) {
   const candidates = [
     ...digestRows.map((row) => ({ agent_name: null as string | null, source_kind: "digest" as MemoryKind, source_table: "public_digests", source_id: row.id, content: row.content })),
     ...episodicRows.map((row) => ({ agent_name: agentName, source_kind: "episodic" as MemoryKind, source_table: "tier2_episodic", source_id: row.id, content: row.content })),
+    ...verbatimRows.map((row) => ({ agent_name: agentName, source_kind: "verbatim" as MemoryKind, source_table: "tier0_verbatim", source_id: row.id, content: row.content })),
     ...archivalRows.map((row) => ({ agent_name: agentName, source_kind: "archival" as MemoryKind, source_table: "tier3_archival", source_id: row.id, content: row.content })),
   ]
     .map((row) => ({ ...row, content: row.content.replace(/\s+/g, " ").trim(), content_hash: hashText(row.content.replace(/\s+/g, " ").trim()) }))
@@ -767,9 +777,9 @@ async function compact(agentName: string) {
      FROM agent_memory_artifacts
      WHERE (agent_name = ? OR agent_name IS NULL)
        AND status = 'active'
-       AND source_kind IN ('digest', 'episodic')
-     ORDER BY importance DESC, recall_count DESC, strength DESC, decay_score DESC
-     LIMIT 12`,
+       AND source_kind IN ('digest', 'episodic', 'verbatim')
+      ORDER BY importance DESC, recall_count DESC, strength DESC, decay_score DESC
+      LIMIT 12`,
   ).all(agentName) as Array<{
     id: number;
     source_kind: MemoryKind;
@@ -780,9 +790,7 @@ async function compact(agentName: string) {
     decay_score: number;
   }>;
 
-  const selected = candidates
-    .filter((row) => (row.recall_count ?? 0) >= 2 || (row.strength ?? 0) >= 2 || row.importance === "high" || row.importance === "critical")
-    .slice(0, 6);
+  const selected = selectCompactionCandidates(candidates);
 
   if (selected.length < 3) {
     console.log(JSON.stringify({ compacted: 0, reason: "not-enough-reinforced-candidates" }));

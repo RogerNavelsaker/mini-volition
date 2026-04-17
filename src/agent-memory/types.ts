@@ -1,4 +1,4 @@
-export type MemoryKind = "digest" | "episodic" | "archival";
+export type MemoryKind = "digest" | "episodic" | "archival" | "verbatim";
 
 export type EmbedResponse = {
   embeddings: number[][];
