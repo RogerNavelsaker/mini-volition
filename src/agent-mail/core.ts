@@ -17,6 +17,7 @@ export type BurstEnvelope = {
   mergedCount: number;
   remainingUnread: number;
 };
+export type MailFilter = (msg: FleetMessage) => boolean;
 
 export function ensureMailSchema(db: Database) {
   db.run(`CREATE TABLE IF NOT EXISTS fleet_comms (
@@ -65,9 +66,13 @@ export function unreadQueryFor(db: Database, agent: string) {
   );
 }
 
-export function countUnread(db: Database, agent: string): number {
-  const rec = unreadQueryFor(db, agent).all(agent, agent, `%|${agent}|%`) as FleetMessage[];
-  return rec.length;
+function filteredUnread(db: Database, agent: string, filter?: MailFilter): FleetMessage[] {
+  const unread = unreadQueryFor(db, agent).all(agent, agent, `%|${agent}|%`) as FleetMessage[];
+  return filter ? unread.filter(filter) : unread;
+}
+
+export function countUnread(db: Database, agent: string, filter?: MailFilter): number {
+  return filteredUnread(db, agent, filter).length;
 }
 
 export function buildBurstFromPrimary(agent: string, primary: FleetMessage, unread: FleetMessage[], maxMessages: number, windowSec: number): BurstEnvelope {
@@ -92,15 +97,15 @@ export function buildBurstFromPrimary(agent: string, primary: FleetMessage, unre
   };
 }
 
-export function peekBurst(db: Database, agent: string, maxMessages: number, windowSec: number): BurstEnvelope | null {
-  const unread = unreadQueryFor(db, agent).all(agent, agent, `%|${agent}|%`) as FleetMessage[];
+export function peekBurst(db: Database, agent: string, maxMessages: number, windowSec: number, filter?: MailFilter): BurstEnvelope | null {
+  const unread = filteredUnread(db, agent, filter);
   if (unread.length === 0) return null;
   const primary = unread[0];
   return buildBurstFromPrimary(agent, primary, unread, maxMessages, windowSec);
 }
 
-export function claimBurst(db: Database, agent: string, maxMessages: number, windowSec: number, primaryId?: number): BurstEnvelope | null {
-  const unread = unreadQueryFor(db, agent).all(agent, agent, `%|${agent}|%`) as FleetMessage[];
+export function claimBurst(db: Database, agent: string, maxMessages: number, windowSec: number, primaryId?: number, filter?: MailFilter): BurstEnvelope | null {
+  const unread = filteredUnread(db, agent, filter);
   if (unread.length === 0) return null;
   const primary = primaryId ? unread.find((msg) => msg.id === primaryId) : unread[0];
   if (!primary) return null;
@@ -116,7 +121,7 @@ export function claimBurst(db: Database, agent: string, maxMessages: number, win
       [msg.id, agent],
     );
   }
-  return { ...burst, remainingUnread: Math.max(0, countUnread(db, agent)) };
+  return { ...burst, remainingUnread: Math.max(0, countUnread(db, agent, filter)) };
 }
 
 export function completeBurst(db: Database, agent: string, messageIds: number[]) {

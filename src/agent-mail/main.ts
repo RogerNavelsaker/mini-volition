@@ -1,11 +1,13 @@
 import { Database } from "bun:sqlite";
-import { buildBurstFromPrimary, claimBurst, completeBurst, countUnread, ensureMailSchema, peekBurst, reclaimStaleClaims, releaseClaims, type BurstEnvelope, type FleetMessage, unreadQueryFor } from "./core";
+import { buildBurstFromPrimary, claimBurst, completeBurst, countUnread, ensureMailSchema, peekBurst, reclaimStaleClaims, releaseClaims, type BurstEnvelope, type FleetMessage, type MailFilter, unreadQueryFor } from "./core";
 import { appendMailArtifact } from "../state-artifacts/lib";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 
 const dbPath = process.env.AGENT_MAIL_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-mail.db");
 const db = new Database(dbPath);
+const stateDbPath = process.env.AGENT_STATE_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-state.db");
+const stateDb = new Database(stateDbPath);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -37,6 +39,9 @@ await withBusyRetry(() => {
   db.exec("PRAGMA synchronous = NORMAL;");
   ensureMailSchema(db);
 });
+stateDb.exec("PRAGMA busy_timeout = 5000;");
+stateDb.exec("PRAGMA journal_mode = WAL;");
+stateDb.exec("PRAGMA synchronous = NORMAL;");
 
 const SKILL = `---
 name: agent-mail
@@ -79,6 +84,42 @@ const formatMessage = (msg: FleetMessage) => {
   const target = msg.recipient.toLowerCase() === "all" ? "" : ` -> ${msg.recipient}`;
   return `[${time}] <${msg.sender}${target}> ${msg.body}`;
 };
+
+type SubscriptionState = {
+  status: string;
+  resume_at: string | null;
+};
+
+function mailChannelFor(msg: FleetMessage): string | null {
+  const recipient = msg.recipient.toLowerCase();
+  const layer = msg.layer.toLowerCase();
+  if (layer !== "public") return null;
+  if (recipient === "all") return "chat:general";
+  if (recipient.startsWith("chat:")) return recipient;
+  return recipient;
+}
+
+function activeSubscriptions(agent: string): Map<string, SubscriptionState> {
+  const rows = stateDb
+    .prepare("SELECT channel, status, resume_at FROM fleet_channel_subscriptions WHERE agent_name = ?")
+    .all(agent) as Array<{ channel: string; status: string; resume_at: string | null }>;
+  return new Map(rows.map((row) => [String(row.channel).toLowerCase(), { status: row.status, resume_at: row.resume_at }]));
+}
+
+function subscriptionFilterFor(agent: string): MailFilter {
+  const subscriptions = activeSubscriptions(agent);
+  const now = Date.now();
+  return (msg: FleetMessage) => {
+    const channel = mailChannelFor(msg);
+    if (!channel) return true;
+    const subscription = subscriptions.get(channel);
+    if (!subscription) return true;
+    if (subscription.status !== "unsubscribed") return true;
+    if (!subscription.resume_at) return false;
+    const resumeAtMs = new Date(subscription.resume_at.endsWith("Z") ? subscription.resume_at : `${subscription.resume_at}Z`).getTime();
+    return !Number.isFinite(resumeAtMs) || resumeAtMs <= now;
+  };
+}
 
 function stateDir(...parts: string[]) {
   return join(resolve(process.cwd(), process.env.FLEET_STATE_DIR || join(process.env.META_REPO_ROOT || ".", "state")), ...parts);
@@ -276,7 +317,7 @@ if (cmd === "send") {
   });
 } else if (cmd === "listen") {
   while (true) {
-    const burst = await withBusyRetry(() => claimBurst(db, sender, 1, 0));
+    const burst = await withBusyRetry(() => claimBurst(db, sender, 1, 0, undefined, subscriptionFilterFor(sender)));
     if (burst) {
       console.log(JSON.stringify(burst.primary));
       process.exit(0);
@@ -289,7 +330,7 @@ if (cmd === "send") {
   const windowSec = Math.max(0, parseInt(arg2 || "300", 10) || 300);
 
   while (true) {
-    const burst = await withBusyRetry(() => claimBurst(db, sender, maxMessages, windowSec));
+    const burst = await withBusyRetry(() => claimBurst(db, sender, maxMessages, windowSec, undefined, subscriptionFilterFor(sender)));
     if (burst) {
       console.log(JSON.stringify(burst));
       process.exit(0);
@@ -300,13 +341,13 @@ if (cmd === "send") {
 } else if (cmd === "peek-burst") {
   const maxMessages = Math.max(1, parseInt(arg1 || "6", 10) || 6);
   const windowSec = Math.max(0, parseInt(arg2 || "300", 10) || 300);
-  const burst = await withBusyRetry(() => peekBurst(db, sender, maxMessages, windowSec));
+  const burst = await withBusyRetry(() => peekBurst(db, sender, maxMessages, windowSec, subscriptionFilterFor(sender)));
   console.log(JSON.stringify(burst));
 } else if (cmd === "claim-burst") {
   const maxMessages = Math.max(1, parseInt(arg1 || "6", 10) || 6);
   const windowSec = Math.max(0, parseInt(arg2 || "300", 10) || 300);
   const primaryId = arg3 ? Math.max(1, parseInt(arg3, 10) || 0) : undefined;
-  const burst = await withBusyRetry(() => claimBurst(db, sender, maxMessages, windowSec, primaryId));
+  const burst = await withBusyRetry(() => claimBurst(db, sender, maxMessages, windowSec, primaryId, subscriptionFilterFor(sender)));
   if (burst) {
     appendMailArtifact(sender, {
       record_type: "claim",
