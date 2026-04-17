@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { ensureJobSchema, nextQueuedJob, normalizePriority, PRIORITIES, reclaimStaleClaims } from "./core";
+import { ensureJobSchema, nextQueuedEvent, nextQueuedJob, normalizePriority, PRIORITIES, reclaimStaleClaims, reclaimStaleEventClaims } from "./core";
 import { appendJobArtifact } from "../state-artifacts/lib";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
@@ -28,10 +28,10 @@ if (Bun.argv[2] === "skill") {
 }
 
 const [, , cmd, arg1, arg2, arg3, arg4] = Bun.argv;
-const arg5 = Bun.argv[6];
+const arg5 = Bun.argv[7];
 
 function usage(): never {
-  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|alarm-set|alarm-list|alarm-cancel|reclaim-stale|rebuild|verify|list|skill> ...");
+  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|event-publish|event-peek|event-claim|event-complete|event-list|alarm-set|alarm-list|alarm-cancel|reclaim-stale|rebuild|verify|list|skill> ...");
   process.exit(64);
 }
 
@@ -62,17 +62,36 @@ function rebuildJobs(agent?: string) {
   try {
     for (const name of agents) {
       db.prepare("DELETE FROM fleet_internal_jobs WHERE target_agent = ?").run(name);
+      db.prepare("DELETE FROM fleet_local_events WHERE target_agent = ?").run(name);
       const rows = readJsonl(stateDir("jobs", `${name}.jsonl`));
       const latestById = new Map<number, any>();
+      const latestEventsById = new Map<number, any>();
       for (const row of rows) {
         if (row.record_type === "job" && row.job && typeof row.job === "object") {
           const job = row.job as any;
           if (job.id != null) latestById.set(Number(job.id), job);
+        } else if (row.record_type === "event" && row.local_event && typeof row.local_event === "object") {
+          const localEvent = row.local_event as any;
+          if (localEvent.id != null) latestEventsById.set(Number(localEvent.id), localEvent);
         } else if (row.record_type === "job_claim_recovery" && Array.isArray(row.reclaimed_ids)) {
           for (const id of row.reclaimed_ids as unknown[]) {
             const current = latestById.get(Number(id));
             if (!current) continue;
             latestById.set(Number(id), {
+              ...current,
+              status: "queued",
+              claimed_at: null,
+              claimed_by: null,
+              completed_at: null,
+              last_error: "stale claim recovered",
+              updated_at: row.recorded_at ?? current.updated_at,
+            });
+          }
+        } else if (row.record_type === "event_claim_recovery" && Array.isArray(row.reclaimed_ids)) {
+          for (const id of row.reclaimed_ids as unknown[]) {
+            const current = latestEventsById.get(Number(id));
+            if (!current) continue;
+            latestEventsById.set(Number(id), {
               ...current,
               status: "queued",
               claimed_at: null,
@@ -110,7 +129,30 @@ function rebuildJobs(agent?: string) {
           job.updated_at ?? job.created_at ?? new Date().toISOString(),
         );
       }
-      rebuilt.push({ agent: name, records: rows.length, jobs: latestById.size });
+      const insertEvent = db.prepare(
+        `INSERT INTO fleet_local_events (
+           id, target_agent, event_type, source, content, available_at, status,
+           claimed_at, claimed_by, completed_at, last_error, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const localEvent of [...latestEventsById.values()].sort((a, b) => Number(a.id) - Number(b.id))) {
+        insertEvent.run(
+          localEvent.id,
+          localEvent.target_agent,
+          localEvent.event_type,
+          localEvent.source,
+          localEvent.content,
+          localEvent.available_at ?? null,
+          localEvent.status ?? "queued",
+          localEvent.claimed_at ?? null,
+          localEvent.claimed_by ?? null,
+          localEvent.completed_at ?? null,
+          localEvent.last_error ?? null,
+          localEvent.created_at ?? localEvent.updated_at ?? new Date().toISOString(),
+          localEvent.updated_at ?? localEvent.created_at ?? new Date().toISOString(),
+        );
+      }
+      rebuilt.push({ agent: name, records: rows.length, jobs: latestById.size, local_events: latestEventsById.size });
     }
     db.exec("COMMIT;");
   } catch (error) {
@@ -132,22 +174,36 @@ function verifyJobs(agent?: string) {
   const verified = agents.map((name) => {
     const rows = readJsonl(stateDir("jobs", `${name}.jsonl`));
     const expected = new Map<number, any>();
+    const expectedEvents = new Map<number, any>();
     for (const row of rows) {
       if (row.record_type === "job" && row.job && typeof row.job === "object") {
         const job = row.job as any;
         if (job.id != null) expected.set(Number(job.id), job);
+      } else if (row.record_type === "event" && row.local_event && typeof row.local_event === "object") {
+        const localEvent = row.local_event as any;
+        if (localEvent.id != null) expectedEvents.set(Number(localEvent.id), localEvent);
       } else if (row.record_type === "job_claim_recovery" && Array.isArray(row.reclaimed_ids)) {
         for (const id of row.reclaimed_ids as unknown[]) {
           const current = expected.get(Number(id));
           if (!current) continue;
           expected.set(Number(id), { ...current, status: "queued", claimed_at: null, claimed_by: null, completed_at: null, last_error: "stale claim recovered" });
         }
+      } else if (row.record_type === "event_claim_recovery" && Array.isArray(row.reclaimed_ids)) {
+        for (const id of row.reclaimed_ids as unknown[]) {
+          const current = expectedEvents.get(Number(id));
+          if (!current) continue;
+          expectedEvents.set(Number(id), { ...current, status: "queued", claimed_at: null, claimed_by: null, completed_at: null, last_error: "stale claim recovered" });
+        }
       }
     }
     const actualRows = db.prepare("SELECT id, status, target_agent, wait_reason, blocked_on, claimed_by, completed_at, cancelled_at, last_error FROM fleet_internal_jobs WHERE target_agent = ? ORDER BY id ASC").all(name) as any[];
+    const actualEventRows = db.prepare("SELECT id, status, target_agent, event_type, source, claimed_by, completed_at, last_error FROM fleet_local_events WHERE target_agent = ? ORDER BY id ASC").all(name) as any[];
     const actual = new Map(actualRows.map((row) => [Number(row.id), row]));
+    const actualEvents = new Map(actualEventRows.map((row) => [Number(row.id), row]));
     const missing = [...expected.keys()].filter((id) => !actual.has(id));
     const extra = [...actual.keys()].filter((id) => !expected.has(id));
+    const missingEvents = [...expectedEvents.keys()].filter((id) => !actualEvents.has(id));
+    const extraEvents = [...actualEvents.keys()].filter((id) => !expectedEvents.has(id));
     const mismatched = [...expected.entries()]
       .filter(([id, job]) => {
         const row = actual.get(id);
@@ -162,19 +218,41 @@ function verifyJobs(agent?: string) {
         );
       })
       .map(([id]) => id);
+    const mismatchedEvents = [...expectedEvents.entries()]
+      .filter(([id, localEvent]) => {
+        const row = actualEvents.get(id);
+        return row && (
+          row.status !== (localEvent.status ?? "queued")
+          || row.target_agent !== localEvent.target_agent
+          || row.event_type !== localEvent.event_type
+          || row.source !== localEvent.source
+          || (row.claimed_by ?? null) !== (localEvent.claimed_by ?? null)
+          || (row.completed_at ?? null) !== (localEvent.completed_at ?? null)
+          || (row.last_error ?? null) !== (localEvent.last_error ?? null)
+        );
+      })
+      .map(([id]) => id);
     const issues = [
       missing.length ? `missing job ids: ${missing.join(",")}` : null,
       extra.length ? `extra job ids: ${extra.join(",")}` : null,
       mismatched.length ? `mismatched job ids: ${mismatched.join(",")}` : null,
+      missingEvents.length ? `missing local event ids: ${missingEvents.join(",")}` : null,
+      extraEvents.length ? `extra local event ids: ${extraEvents.join(",")}` : null,
+      mismatchedEvents.length ? `mismatched local event ids: ${mismatchedEvents.join(",")}` : null,
     ].filter(Boolean);
     return {
       agent: name,
       ok: issues.length === 0,
       expected_jobs: expected.size,
       actual_jobs: actual.size,
+      expected_local_events: expectedEvents.size,
+      actual_local_events: actualEvents.size,
       missing_ids: missing,
       extra_ids: extra,
       mismatched_ids: mismatched,
+      missing_event_ids: missingEvents,
+      extra_event_ids: extraEvents,
+      mismatched_event_ids: mismatchedEvents,
       issues,
       repair: issues.length === 0 ? null : `agent-jobs rebuild ${name}`,
     };
@@ -409,6 +487,85 @@ if (cmd === "queue") {
   const resumed = db.prepare("SELECT * FROM fleet_internal_jobs WHERE id = ?").get(Number(arg1)) as any;
   appendJobArtifact(arg2, { record_type: "job", event: "resumed", job: resumed });
   console.log(JSON.stringify(resumed ?? null));
+} else if (cmd === "event-publish") {
+  if (!arg1 || !arg2 || !arg3 || !arg4) {
+    console.error("Usage: agent-jobs event-publish <targetAgent> <eventType> <source> <content> [availableAt]");
+    process.exit(64);
+  }
+  db.run(
+    `INSERT INTO fleet_local_events (target_agent, event_type, source, content, available_at, status, updated_at)
+     VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), 'queued', CURRENT_TIMESTAMP)`,
+    [arg1, arg2, arg3, arg4, arg5 ?? null],
+  );
+  const localEvent = db.prepare("SELECT * FROM fleet_local_events WHERE id = last_insert_rowid()").get() as any;
+  appendJobArtifact(arg1, { record_type: "event", event: "published", local_event: localEvent });
+  console.log(JSON.stringify(localEvent ?? null));
+} else if (cmd === "event-peek") {
+  if (!arg1) {
+    console.error("Usage: agent-jobs event-peek <agent>");
+    process.exit(64);
+  }
+  console.log(JSON.stringify(nextQueuedEvent(db, arg1) ?? null));
+} else if (cmd === "event-claim") {
+  if (!arg1) {
+    console.error("Usage: agent-jobs event-claim <agent> [eventId]");
+    process.exit(64);
+  }
+  const requestedId = arg2 ? Math.max(1, parseInt(arg2, 10) || 0) : null;
+  const localEvent = requestedId
+    ? db.prepare(
+        `SELECT * FROM fleet_local_events
+         WHERE id = ?
+           AND target_agent = ?
+           AND status = 'queued'
+           AND datetime(COALESCE(available_at, CURRENT_TIMESTAMP)) <= CURRENT_TIMESTAMP`,
+      ).get(requestedId, arg1) as any
+    : nextQueuedEvent(db, arg1);
+  if (!localEvent) {
+    console.log("null");
+    process.exit(0);
+  }
+  db.run(
+    `UPDATE fleet_local_events
+     SET status = 'claimed',
+         claimed_at = CURRENT_TIMESTAMP,
+         claimed_by = ?,
+         completed_at = NULL,
+         last_error = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status = 'queued'`,
+    [arg1, localEvent.id],
+  );
+  const claimed = db.prepare("SELECT * FROM fleet_local_events WHERE id = ?").get(localEvent.id) as any;
+  if (claimed?.status === "claimed" && claimed?.claimed_by === arg1) {
+    appendJobArtifact(arg1, { record_type: "event", event: "claimed", local_event: claimed });
+  }
+  console.log(JSON.stringify(claimed?.status === "claimed" && claimed?.claimed_by === arg1 ? claimed : null));
+} else if (cmd === "event-complete") {
+  if (!arg1 || !arg2) {
+    console.error("Usage: agent-jobs event-complete <eventId> <agent> [error]");
+    process.exit(64);
+  }
+  db.run(
+    `UPDATE fleet_local_events
+     SET status = 'completed',
+         claimed_by = COALESCE(claimed_by, ?),
+         completed_at = CURRENT_TIMESTAMP,
+         last_error = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [arg2, arg3 ?? null, Number(arg1)],
+  );
+  const completed = db.prepare("SELECT * FROM fleet_local_events WHERE id = ?").get(Number(arg1)) as any;
+  appendJobArtifact(arg2, { record_type: "event", event: "completed", local_event: completed });
+  console.log(JSON.stringify(completed ?? null));
+} else if (cmd === "event-list") {
+  const limit = Math.max(1, parseInt(arg2 || "20", 10) || 20);
+  if (arg1) {
+    console.log(JSON.stringify(db.prepare("SELECT * FROM fleet_local_events WHERE target_agent = ? ORDER BY datetime(COALESCE(available_at, CURRENT_TIMESTAMP)) ASC, id ASC LIMIT ?").all(arg1, limit)));
+  } else {
+    console.log(JSON.stringify(db.prepare("SELECT * FROM fleet_local_events ORDER BY datetime(COALESCE(available_at, CURRENT_TIMESTAMP)) ASC, id ASC LIMIT ?").all(limit)));
+  }
 } else if (cmd === "alarm-set") {
   if (!arg1 || !arg2 || !arg3 || !arg4) {
     console.error("Usage: agent-jobs alarm-set <targetAgent> <alarm|reminder> <message> <dueAt> [sourceJobId]");
@@ -462,6 +619,7 @@ if (cmd === "queue") {
   }
   const ttlMs = Math.max(30_000, parseInt(arg2 || process.env.FLEET_JOB_CLAIM_TTL_MS || "300000", 10) || 300000);
   const reclaimed = reclaimStaleClaims(db, arg1, ttlMs);
+  const reclaimedEvents = reclaimStaleEventClaims(db, arg1, ttlMs);
   if (reclaimed.length > 0) {
     appendJobArtifact(arg1, {
       record_type: "job_claim_recovery",
@@ -470,7 +628,15 @@ if (cmd === "queue") {
       reclaimed_ids: reclaimed,
     });
   }
-  console.log(JSON.stringify({ agent: arg1, ttl_ms: ttlMs, reclaimed_ids: reclaimed }));
+  if (reclaimedEvents.length > 0) {
+    appendJobArtifact(arg1, {
+      record_type: "event_claim_recovery",
+      event: "reclaim_stale",
+      ttl_ms: ttlMs,
+      reclaimed_ids: reclaimedEvents,
+    });
+  }
+  console.log(JSON.stringify({ agent: arg1, ttl_ms: ttlMs, reclaimed_ids: reclaimed, reclaimed_event_ids: reclaimedEvents }));
 } else if (cmd === "rebuild") {
   rebuildJobs(arg1);
 } else if (cmd === "verify") {

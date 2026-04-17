@@ -81,6 +81,11 @@ agent-state subscription-set <agent> <channel> <subscribed|unsubscribed> [resume
 agent-jobs alarm-set <agent> <alarm|reminder> <message> <dueAt> [sourceJobId]
 agent-jobs alarm-list [agent] [limit]
 agent-jobs alarm-cancel <alarmId> <agent>
+agent-jobs event-publish <agent> <eventType> <source> <content> [availableAt]
+agent-jobs event-peek <agent>
+agent-jobs event-claim <agent> [eventId]
+agent-jobs event-complete <eventId> <agent>
+agent-jobs event-list [agent] [limit]
 agent-jobs verify [agent]          # check job projection drift
 agent-mail verify                  # check transport projection drift
 agent-memory verify [agent]        # check memory projection drift

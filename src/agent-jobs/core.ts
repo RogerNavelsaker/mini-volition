@@ -38,6 +38,21 @@ export function ensureJobSchema(db: Database) {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
+  db.run(`CREATE TABLE IF NOT EXISTS fleet_local_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_agent TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    source TEXT NOT NULL,
+    content TEXT NOT NULL,
+    available_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NOT NULL DEFAULT 'queued',
+    claimed_at DATETIME,
+    claimed_by TEXT,
+    completed_at DATETIME,
+    last_error TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
 }
 
 export function normalizePriority(value: string | undefined | null): JobPriority {
@@ -91,6 +106,51 @@ export function reclaimStaleClaims(db: Database, agent: string, ttlMs: number) {
       [job.id, agent],
     );
     reclaimed.push(job.id);
+  }
+  return reclaimed;
+}
+
+export function nextQueuedEvent(db: Database, agent: string) {
+  return db.prepare(
+    `SELECT * FROM fleet_local_events
+     WHERE target_agent = ?
+       AND status = 'queued'
+       AND datetime(COALESCE(available_at, CURRENT_TIMESTAMP)) <= CURRENT_TIMESTAMP
+     ORDER BY
+       datetime(COALESCE(available_at, CURRENT_TIMESTAMP)) ASC,
+       id ASC
+     LIMIT 1`,
+  ).get(agent) as any;
+}
+
+export function reclaimStaleEventClaims(db: Database, agent: string, ttlMs: number) {
+  const minTtlMs = Math.max(30_000, ttlMs || 0);
+  const events = db.prepare(
+    `SELECT id, claimed_at
+     FROM fleet_local_events
+     WHERE target_agent = ?
+       AND status = 'claimed'
+       AND claimed_at IS NOT NULL`,
+  ).all(agent) as Array<{ id: number; claimed_at: string }>;
+  const reclaimed: number[] = [];
+  for (const event of events) {
+    const claimedAtMs = new Date(event.claimed_at.endsWith("Z") ? event.claimed_at : `${event.claimed_at}Z`).getTime();
+    if (!Number.isFinite(claimedAtMs)) continue;
+    if ((Date.now() - claimedAtMs) < minTtlMs) continue;
+    db.run(
+      `UPDATE fleet_local_events
+       SET status = 'queued',
+           claimed_at = NULL,
+           claimed_by = NULL,
+           completed_at = NULL,
+           last_error = 'stale claim recovered',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?
+         AND target_agent = ?
+         AND status = 'claimed'`,
+      [event.id, agent],
+    );
+    reclaimed.push(event.id);
   }
   return reclaimed;
 }
