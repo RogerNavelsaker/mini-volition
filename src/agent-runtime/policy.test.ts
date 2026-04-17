@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { turnProfileConfig } from "./policy";
+import { classifySourceGroup, turnProfileConfig } from "./policy";
 
 describe("turnProfileConfig", () => {
   test("uses global timeout as fallback for every profile", () => {
@@ -33,5 +33,19 @@ describe("turnProfileConfig", () => {
 
     expect(turnProfileConfig("light", env).timeout_ms).toBe(15_000);
     expect(turnProfileConfig("full", env).timeout_ms).toBe(15_000);
+  });
+});
+
+describe("classifySourceGroup", () => {
+  test("classifies internal jobs as internal", () => {
+    expect(classifySourceGroup("internal_job", "internal")).toBe("internal");
+    expect(classifySourceGroup("internal_job", "urgent")).toBe("internal");
+  });
+
+  test("classifies mail layers into stable source groups", () => {
+    expect(classifySourceGroup("mail_burst", "urgent")).toBe("urgent");
+    expect(classifySourceGroup("mail_burst", "private")).toBe("direct");
+    expect(classifySourceGroup("mail_burst", "public")).toBe("social");
+    expect(classifySourceGroup("mail_burst", "unknown")).toBe("ambient");
   });
 });

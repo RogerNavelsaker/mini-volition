@@ -7,7 +7,7 @@ import { createConnection } from "net";
 import { join, dirname } from "path";
 import { ensureSchema as ensureMemorySchema } from "../agent-memory/schema";
 import { appendMemorySourceArtifact } from "../state-artifacts/lib";
-import { chooseRetrievalMode, chooseTurnProfile, turnProfileConfig, type RetrievalMode, type TurnProfile } from "./policy";
+import { chooseRetrievalMode, chooseTurnProfile, classifySourceGroup, turnProfileConfig, type RetrievalMode, type TurnProfile, type WakeSource, type WakeSourceGroup } from "./policy";
 import { ensureTurnJournal, recoverInterruptedTurns, replayPolicyForAction, type TurnCheckpoint, type TurnPhase } from "./recovery";
 
 const name = process.env.AGENT_NAME;
@@ -358,10 +358,10 @@ type InternalJob = {
   created_at: string;
   updated_at: string;
 };
-type WakeSource = "internal_job" | "mail_burst";
 type WakeClass = "hot" | "workload";
 type WakeEvent = {
   source: WakeSource;
+  sourceGroup: WakeSourceGroup;
   wakeReason: string;
   burst: IncomingBurst;
   priority: number;
@@ -1298,6 +1298,10 @@ function wakePriorityFor(source: WakeSource, burst: IncomingBurst, jobPriority?:
   return 20;
 }
 
+function wakeSourceGroupFor(source: WakeSource, burst: IncomingBurst): WakeSourceGroup {
+  return classifySourceGroup(source, burst.primary.layer);
+}
+
 async function selectNextWake(options?: { allowWorkload?: boolean; blockingMail?: boolean }): Promise<WakeEvent | null> {
   const allowWorkload = options?.allowWorkload ?? true;
   const blockingMail = options?.blockingMail ?? true;
@@ -1333,6 +1337,7 @@ async function selectNextWake(options?: { allowWorkload?: boolean; blockingMail?
     const createdAt = claimedJob.created_at.endsWith("Z") ? claimedJob.created_at : `${claimedJob.created_at}Z`;
     return {
       source: "internal_job",
+      sourceGroup: wakeSourceGroupFor("internal_job", eligibleJobBurst),
       wakeReason: `job:${claimedJob.id}`,
       priority: jobPriority,
       wakeClass: wakeClassFor("internal_job", eligibleJobBurst, claimedJob.priority),
@@ -1366,6 +1371,7 @@ async function selectNextWake(options?: { allowWorkload?: boolean; blockingMail?
     if (!claimedMailBurst) return selectNextWake();
     return {
       source: "mail_burst",
+      sourceGroup: wakeSourceGroupFor("mail_burst", claimedMailBurst),
       wakeReason: `mail:${claimedMailBurst.primary.layer}:${claimedMailBurst.primary.id}`,
       priority: mailPriority,
       wakeClass: wakeClassFor("mail_burst", claimedMailBurst),
@@ -1381,6 +1387,7 @@ async function selectNextWake(options?: { allowWorkload?: boolean; blockingMail?
 
   return {
     source: "mail_burst",
+    sourceGroup: wakeSourceGroupFor("mail_burst", blockingMailBurst),
     wakeReason: `mail:${blockingMailBurst.primary.layer}:${blockingMailBurst.primary.id}`,
     priority: wakePriorityFor("mail_burst", blockingMailBurst),
     wakeClass: wakeClassFor("mail_burst", blockingMailBurst),
@@ -1675,7 +1682,7 @@ async function processWakeEvent(
   recordBufferedTurnPhase("started", currentTask);
   flushTurnEventBatch(bufferedTurnPhases, bufferedTurnCheckpoints);
   setRuntimeState("thinking", currentTask, wake.wakeReason, null, null, String(msg.id));
-  recordWorking("system", `Wake selected: ${wake.source} (${wake.wakeReason}, priority=${wake.priority}, class=${wake.wakeClass})`);
+    recordWorking("system", `Wake selected: ${wake.source} (${wake.wakeReason}, group=${wake.sourceGroup}, priority=${wake.priority}, class=${wake.wakeClass})`);
   try {
     const turn = await assembleTurnContext(name, burst, wake.source);
     const executionProfile = forceFullProfile
@@ -2011,7 +2018,7 @@ async function processWakeEvent(
     } else {
       rescheduleInternalJob(msg.id, limitWindow.availableAt, limitWindow.info);
     }
-    const cooldown = forceGovernor(Math.max(1, Math.ceil(limitWindow.sleepMs / 1000)), limitState);
+    const cooldown = forceGovernor(Math.max(1, Math.ceil(limitWindow.sleepMs / 1000)), `${limitState}:${wake.sourceGroup}`);
     const hibernateUntil = cooldown?.forced_cooldown_until ?? limitWindow.availableAt;
     recordWorking(
       "system",
@@ -2220,7 +2227,7 @@ async function processWakeEvent(
         });
         recordBufferedTurnPhase("completed", envelope.summary ?? null);
         flushTurnEventBatch(bufferedTurnPhases, bufferedTurnCheckpoints);
-        bumpGovernor();
+        bumpGovernor(120, 4, `turn_complete:${wake.sourceGroup}`);
         if (msg.layer === "internal") completeInternalJob(msg.id);
         else completeMailBurst(burst.messages.map((entry) => entry.id));
         setRuntimeState(

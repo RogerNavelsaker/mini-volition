@@ -1,5 +1,7 @@
 export type RetrievalMode = "local" | "global" | "mix";
 export type TurnProfile = "light" | "full" | "max";
+export type WakeSource = "internal_job" | "mail_burst";
+export type WakeSourceGroup = "internal" | "urgent" | "direct" | "social" | "ambient";
 export type TurnProfileConfig = {
   model: string | null;
   reasoning_effort: string | null;
@@ -9,12 +11,12 @@ export type RetrievalPolicyBurst = {
   primary: { layer: string };
   messages: Array<{ body: string }>;
 };
-export type RetrievalWakeSource = "internal_job" | "mail_burst";
+export type RetrievalWakeSource = WakeSource;
 export type TurnPolicyBurst = {
   primary: { layer: string };
   messages: Array<{ body: string }>;
 };
-export type TurnWakeSource = "internal_job" | "mail_burst";
+export type TurnWakeSource = WakeSource;
 
 const GLOBAL_HINT = /\b(plan|roadmap|design|architecture|summarize|summary|overview|status|state of|big picture|broadly)\b/i;
 const LOCAL_HINT = /\b(fix|bug|error|trace|specific|exactly|where|which file|why did|urgent|private)\b/i;
@@ -53,6 +55,16 @@ export function turnProfileConfig(
     reasoning_effort: env.INFERENCE_CLOUD_REASONING_EFFORT ?? "medium",
     timeout_ms: parseTimeoutMs(env.INFERENCE_CLOUD_TIMEOUT_MS, defaultTimeoutMs),
   };
+}
+
+export function classifySourceGroup(source: WakeSource, primaryLayer: string): WakeSourceGroup {
+  if (source === "internal_job") return "internal";
+
+  const layer = primaryLayer.toLowerCase();
+  if (layer === "urgent") return "urgent";
+  if (layer === "private") return "direct";
+  if (layer === "public") return "social";
+  return "ambient";
 }
 
 export function chooseRetrievalMode(source: RetrievalWakeSource, burst: RetrievalPolicyBurst): RetrievalMode {
