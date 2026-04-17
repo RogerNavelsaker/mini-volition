@@ -21,6 +21,7 @@ Turn approved plans into commits. Combines trellis (state), seeds (issues), mulc
         - Record: `tl plan update <slug> --step-note "<step-id>: done"`
     3. Complete: `tl plan complete <slug> --summary "<outcome>"`
     4. Close: `sd close <issue-id>`
+    5. Unblock dependents: `sd unblock --all <issue-id>` (or per-dep: `sd unblock <dep-id> --from <issue-id>`)
 
 ## Rules
 - One commit per plan step. No squashing.

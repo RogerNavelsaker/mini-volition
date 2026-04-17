@@ -35,6 +35,7 @@ Tier 1 Close:
          git merge --no-ff <slug> -m "merge: <slug> (#<issue-id>)"
 - [ ] 6. Verify post-merge:     bun run scripts/build.ts && bun test
 - [ ] 7. Close the issue:       sd close <issue-id>
+- [ ] 7a. Unblock dependents:  sd unblock --all <issue-id>
 - [ ] 8. Sync state dirs:       sd sync && ml sync && tl sync && cn sync && fx sync
 - [ ] 9. Retire the feature worktree:
          cd <main-worktree>
@@ -44,6 +45,28 @@ Tier 1 Close:
 
 `tl sync` stages and commits any pending `.trellis/` changes with a generated body listing what moved — use it rather than `git add .trellis/` to keep the message consistent.
 `fx sync` stages and commits `.flox/env/manifest.toml` and `.flox/env/manifest.lock` as `chore: sync flox env`.
+
+### Branch-divergence conflicts (tier 1)
+
+In long sessions with many feature branches, `integration` accumulates merges that the current branch doesn't have, causing UU conflicts on `git merge --no-ff <slug>`.
+
+**Option A — cherry-pick prereqs** (when the conflicting files come from a small number of prior feature commits):
+```
+git merge --abort
+git cherry-pick <sha-of-prereq-commit>   # repeat for each needed commit
+git merge --no-ff <slug> -m "merge: <slug> (#<issue-id>)"
+```
+
+**Option B — direct apply** (when conflicts are widespread or cherry-picks are tangled):
+```
+git merge --abort
+# copy changed files from feature branch directly into integration's working tree:
+git show <slug>:<path/to/file> > <path/to/file>   # repeat per changed file
+git add <files>
+git commit -m "merge: <slug> (#<issue-id>)"
+```
+
+Use option A when the prereq set is small and clean; option B when the conflict surface is too large to cherry-pick selectively.
 
 ### Rollback (tier 1)
 
