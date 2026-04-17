@@ -10,6 +10,7 @@ import { appendMemorySourceArtifact } from "../state-artifacts/lib";
 import { chooseRetrievalMode, chooseTurnProfile, turnProfileConfig, retryConfig, type RetrievalMode, type TurnProfile } from "./policy";
 import { runDispatchLoop } from "./dispatch";
 import { ensureTurnJournal, recoverInterruptedTurns, replayPolicyForAction, type TurnCheckpoint, type TurnPhase } from "./recovery";
+import { executeActionQueue, loadCompletedActionIndexes, HaltError } from "./action-queue";
 
 const name = process.env.AGENT_NAME;
 const command = process.env.AGENT_COMMAND?.split(" ") || [];
@@ -2068,71 +2069,101 @@ async function processWakeEvent(
     }
 
     if (envelope) {
-    for (const [actionIndex, action] of envelope.actions.entries()) {
-      const oneBasedIndex = actionIndex + 1;
-      const actionDetail =
-        action.type === "reply" ? action.message.trim()
-        : action.type === "note" ? action.message.trim()
-        : action.type === "sleep_until" ? action.until
-        : action.type === "queue_task" ? action.task
-        : action.type === "escalate" ? action.message
-        : action.type === "scratchpad" ? `${action.op}${action.content ? `: ${action.content.slice(0, 80)}` : ""}`
-        : action.type === "spawn_scribe" ? `${action.name}: ${action.task.slice(0, 80)}`
-        : null;
-      recordBufferedAction(action.type, oneBasedIndex, "planned", actionDetail, msg.id);
-      try {
-        recordBufferedAction(action.type, oneBasedIndex, "started", actionDetail, msg.id);
-        if (action.type === "reply") {
-          if (msg.layer !== "internal") {
-            sendMessage(msg.sender, msg.layer, action.message.trim());
-            recordWorking("system", `Executed action: reply to ${msg.sender} on ${msg.layer}`);
-          } else {
-            recordWorking("system", `Skipped external reply for internal wake: ${action.message.trim()}`);
-          }
-        } else if (action.type === "note") {
-          recordWorking("system", `Action note: ${action.message.trim()}`);
-        } else if (action.type === "sleep_until") {
-          setRuntimeState("sleeping", envelope.state?.current_task ?? currentTask, "sleep_until", null, action.until, String(msg.id));
-          recordWorking("system", `Executed action: sleep_until ${action.until}`);
-          await sleepUntil(action.until);
-        } else if (action.type === "queue_task") {
-          const targetAgent = action.target_agent || name!;
-          const queued = queueInternalJob(action.task, targetAgent, action.priority ?? "normal", action.run_at ?? null);
-          recordWorking("system", `Executed action: queue_task for ${targetAgent}${queued ? ` as job ${queued.id}` : ""} (${action.priority ?? "normal"})`);
-        } else if (action.type === "escalate") {
-          const escalationLayer = action.channel ?? "private";
-          sendMessage("operator", escalationLayer, `[ESCALATION from ${name}]: ${action.message}`);
-          recordWorking("system", `Executed action: escalate to operator on ${escalationLayer}`);
-        } else if (action.type === "scratchpad") {
-          const current = readScratchpad(name);
-          if (action.op === "clear") {
-            writeScratchpad(name, "");
-            recordWorking("system", `Executed action: scratchpad clear (was ${current.length} chars)`);
-          } else if (action.op === "replace") {
-            writeScratchpad(name, action.content ?? "");
-            recordWorking("system", `Executed action: scratchpad replace (${(action.content ?? "").length} chars)`);
-          } else {
-            writeScratchpad(name, current + (current && !current.endsWith("\n") ? "\n" : "") + (action.content ?? ""));
-            recordWorking("system", `Executed action: scratchpad append (+${(action.content ?? "").length} chars, now ${readScratchpad(name).length}/${SCRATCHPAD_CAP})`);
-          }
-        } else if (action.type === "spawn_scribe") {
-          const scribeResult = await requestScribe(action.name, action.task);
-          if (scribeResult) {
-            sendMessage(name!, "private", `[scribe:${action.name}] ${scribeResult}`);
-            recordWorking("system", `Executed action: spawn_scribe ${action.name} — result delivered to agent-mail`);
-          } else {
-            recordWorking("system", `Executed action: spawn_scribe ${action.name} — inference failed or timed out`);
-          }
-        } else {
-          recordWorking("system", "Executed action: noop");
-        }
-        recordBufferedAction(action.type, oneBasedIndex, "completed", actionDetail, msg.id);
-      } catch (error) {
-        const errorText = error instanceof Error ? error.message : String(error);
-        recordBufferedAction(action.type, oneBasedIndex, "failed", errorText, msg.id);
-        throw error;
+      const completedIndexes = forceFullProfile
+        ? loadCompletedActionIndexes(runStateQuery, name!, msg.id)
+        : new Set<number>();
+      if (completedIndexes.size > 0) {
+        recordWorking("system", `Resume: skipping ${completedIndexes.size} already-completed action(s) for message ${msg.id}`);
       }
-    }
+      const queueResult = await executeActionQueue(
+        envelope.actions as Array<{ type: string; [key: string]: unknown }>,
+        {
+          journal: (actionType, actionIndex, phase, detail) => {
+            recordBufferedAction(actionType, actionIndex, phase, detail, msg.id);
+            execFileSync(
+              "agent-state",
+              ["record-actions-batch", name!, JSON.stringify([{
+                action_type: actionType,
+                action_index: actionIndex,
+                phase,
+                detail: detail ?? null,
+                message_id: msg.id,
+                replay_disposition: replayPolicyForAction(actionType).disposition,
+                replay_reason: replayPolicyForAction(actionType).reason,
+              }])],
+              { stdio: "ignore", maxBuffer: 1024 * 1024 },
+            );
+          },
+          execute: async (action, _actionIndex) => {
+            const a = action as Action;
+            if (a.type === "reply") {
+              if (msg.layer !== "internal") {
+                sendMessage(msg.sender, msg.layer, (a as ReplyAction).message.trim());
+                recordWorking("system", `Executed action: reply to ${msg.sender} on ${msg.layer}`);
+                return `reply to ${msg.sender} on ${msg.layer}`;
+              } else {
+                recordWorking("system", `Skipped external reply for internal wake: ${(a as ReplyAction).message.trim()}`);
+                return "skipped (internal wake)";
+              }
+            } else if (a.type === "note") {
+              recordWorking("system", `Action note: ${(a as NoteAction).message.trim()}`);
+              return null;
+            } else if (a.type === "sleep_until") {
+              setRuntimeState("sleeping", envelope.state?.current_task ?? currentTask, "sleep_until", null, (a as SleepUntilAction).until, String(msg.id));
+              recordWorking("system", `Executed action: sleep_until ${(a as SleepUntilAction).until}`);
+              await sleepUntil((a as SleepUntilAction).until);
+              return (a as SleepUntilAction).until;
+            } else if (a.type === "queue_task") {
+              const targetAgent = (a as QueueTaskAction).target_agent || name!;
+              const queued = queueInternalJob((a as QueueTaskAction).task, targetAgent, (a as QueueTaskAction).priority ?? "normal", (a as QueueTaskAction).run_at ?? null);
+              recordWorking("system", `Executed action: queue_task for ${targetAgent}${queued ? ` as job ${queued.id}` : ""} (${(a as QueueTaskAction).priority ?? "normal"})`);
+              return `${targetAgent}:${(a as QueueTaskAction).task.slice(0, 80)}`;
+            } else if (a.type === "escalate") {
+              const escalationLayer = (a as EscalateAction).channel ?? "private";
+              sendMessage("operator", escalationLayer, `[ESCALATION from ${name}]: ${(a as EscalateAction).message}`);
+              recordWorking("system", `Executed action: escalate to operator on ${escalationLayer}`);
+              return `escalate on ${escalationLayer}`;
+            } else if (a.type === "scratchpad") {
+              const current = readScratchpad(name);
+              if ((a as ScratchpadAction).op === "clear") {
+                writeScratchpad(name, "");
+                recordWorking("system", `Executed action: scratchpad clear (was ${current.length} chars)`);
+              } else if ((a as ScratchpadAction).op === "replace") {
+                writeScratchpad(name, (a as ScratchpadAction).content ?? "");
+                recordWorking("system", `Executed action: scratchpad replace (${((a as ScratchpadAction).content ?? "").length} chars)`);
+              } else {
+                writeScratchpad(name, current + (current && !current.endsWith("\n") ? "\n" : "") + ((a as ScratchpadAction).content ?? ""));
+                recordWorking("system", `Executed action: scratchpad append (+${((a as ScratchpadAction).content ?? "").length} chars, now ${readScratchpad(name).length}/${SCRATCHPAD_CAP})`);
+              }
+              return `${(a as ScratchpadAction).op}`;
+            } else if (a.type === "spawn_scribe") {
+              const scribeResult = await requestScribe((a as SpawnScribeAction).name, (a as SpawnScribeAction).task);
+              if (scribeResult) {
+                sendMessage(name!, "private", `[scribe:${(a as SpawnScribeAction).name}] ${scribeResult}`);
+                recordWorking("system", `Executed action: spawn_scribe ${(a as SpawnScribeAction).name} — result delivered to agent-mail`);
+              } else {
+                recordWorking("system", `Executed action: spawn_scribe ${(a as SpawnScribeAction).name} — inference failed or timed out`);
+              }
+              return `spawn_scribe:${(a as SpawnScribeAction).name}`;
+            } else {
+              recordWorking("system", "Executed action: noop");
+              return null;
+            }
+          },
+          escalate: (haltMsg) => {
+            sendMessage("operator", "urgent", `[ACTION HALT] ${name}: ${haltMsg}`);
+          },
+          log: (msg) => recordWorking("system", msg),
+        },
+        completedIndexes,
+      );
+      if (queueResult.halted) {
+        recordBufferedTurnPhase("failed", queueResult.haltReason);
+        flushTurnEventBatch(bufferedTurnPhases, bufferedTurnCheckpoints);
+        flushActionBatch(bufferedActionRecords);
+        if (wake.source === "internal_job") failInternalJob(msg.id, queueResult.haltReason ?? "action queue halted");
+        return;
+      }
     }
 
     // Check for provider-level errors in diagnosticBuffer (covers both modes)

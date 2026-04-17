@@ -36,28 +36,28 @@ export function turnProfileConfig(
   profile: TurnProfile,
   env: Record<string, string | undefined> = process.env,
 ): TurnProfileConfig {
-  const defaultTimeoutMs = parseTimeoutMs(env.FLEET_TURN_TIMEOUT_MS, 120_000);
+  const defaultTimeoutMs = parseTimeoutMs(env.INFERENCE_TURN_TIMEOUT_MS, 120_000);
 
   if (profile === "light") {
     return {
       model: env.INFERENCE_LOCAL_SMALL_MODEL ?? null,
       reasoning_effort: env.INFERENCE_LOCAL_SMALL_REASONING_EFFORT ?? "low",
-      timeout_ms: parseTimeoutMs(env.FLEET_LIGHT_TIMEOUT_MS, defaultTimeoutMs),
+      timeout_ms: parseTimeoutMs(env.INFERENCE_LOCAL_SMALL_TIMEOUT_MS, defaultTimeoutMs),
     };
   }
 
   if (profile === "max") {
     return {
-      model: env.FLEET_MAX_MODEL ?? null,
-      reasoning_effort: env.FLEET_MAX_REASONING_EFFORT ?? "high",
-      timeout_ms: parseTimeoutMs(env.FLEET_MAX_TIMEOUT_MS, defaultTimeoutMs),
+      model: env.INFERENCE_CLOUD_MAX_MODEL ?? env.INFERENCE_CLOUD_MODEL ?? null,
+      reasoning_effort: env.INFERENCE_CLOUD_MAX_REASONING_EFFORT ?? "high",
+      timeout_ms: parseTimeoutMs(env.INFERENCE_CLOUD_MAX_TIMEOUT_MS, defaultTimeoutMs),
     };
   }
 
   return {
-    model: env.FLEET_FULL_MODEL ?? null,
-    reasoning_effort: env.FLEET_FULL_REASONING_EFFORT ?? "medium",
-    timeout_ms: parseTimeoutMs(env.FLEET_FULL_TIMEOUT_MS, defaultTimeoutMs),
+    model: env.INFERENCE_CLOUD_MODEL ?? null,
+    reasoning_effort: env.INFERENCE_CLOUD_REASONING_EFFORT ?? "medium",
+    timeout_ms: parseTimeoutMs(env.INFERENCE_CLOUD_TIMEOUT_MS, defaultTimeoutMs),
   };
 }
 

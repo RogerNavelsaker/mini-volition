@@ -13,7 +13,7 @@ One loop/turn per agent.
 
 ## §Phase3: Execution
 - **τACP**: Provider session streaming.
-- **τDeadman**: Enforce `FLEET_TURN_TIMEOUT_MS`.
+- **τDeadman**: Enforce `INFERENCE_TURN_TIMEOUT_MS` with per-profile overrides.
 - **τMachete**: Hard 20k char truncation.
 - **τEnvelope**: Validated JSON.
 - **Durable**: Batch flush to `agent-state.db` + `state/`.
