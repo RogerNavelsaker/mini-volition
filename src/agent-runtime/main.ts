@@ -344,6 +344,7 @@ type TurnAssembly = {
   recalledArtifactIds: number[];
   scratchpad: string;
   scratchpadStatus: { chars: number; cap: number; ratio: number; warning: string };
+  ghostHistory: { reason: string; detectedAt: string } | null;
 };
 type InternalJob = {
   id: number;
@@ -1458,6 +1459,16 @@ async function assembleTurnContext(agentName: string, burst: IncomingBurst, wake
 
   const scratchpad = readScratchpad(agentName);
 
+  const ghostRow = runStateQuery(
+    `SELECT detail, created_at FROM fleet_turn_journal
+     WHERE agent_name = ? AND wake_source = 'ghost_check' AND phase = 'failed'
+     ORDER BY created_at DESC LIMIT 1`,
+    agentName,
+  )[0] as { detail: string; created_at: string } | undefined;
+  const ghostHistory = ghostRow
+    ? { reason: ghostRow.detail ?? "unknown", detectedAt: ghostRow.created_at }
+    : null;
+
   return {
     inboundBurstText,
     sleepDeltaSeconds,
@@ -1474,6 +1485,7 @@ async function assembleTurnContext(agentName: string, burst: IncomingBurst, wake
     recalledArtifactIds,
     scratchpad,
     scratchpadStatus: scratchpadStatus(scratchpad),
+    ghostHistory,
   };
 }
 
@@ -1587,6 +1599,7 @@ ${traceLines.length ? traceLines.join("\n") : "- (none)"}
 ${workingLines.length ? workingLines.join("\n") : "- (start)"}
 §SCRATCHPAD ${turn.scratchpadStatus.chars}/${turn.scratchpadStatus.cap}${turn.scratchpadStatus.warning ? ` ⚠ ${turn.scratchpadStatus.warning}` : ""}
 ${turn.scratchpad ? budgetSection(turn.scratchpad.split("\n"), BUDGET_SCRATCHPAD_CHARS).join("\n") : "- (empty)"}
+${turn.ghostHistory ? `§GHOST recovered at=${new Date().toISOString()} detected_at=${turn.ghostHistory.detectedAt} reason=${turn.ghostHistory.reason}\nYou were previously marked ghost (process appeared dead). Reorient from §WM and §SCRATCHPAD before acting.` : ""}
 §REMINDER budget=${OUTPUT_BUDGET_CHARS} reply→${msg.layer}→${msg.sender} JSON only
 §BURST
 ${turn.inboundBurstText}
