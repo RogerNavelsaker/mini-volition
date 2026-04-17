@@ -1,15 +1,17 @@
 import { join } from "path";
 import { Database } from "bun:sqlite";
-import { ensureLibrarianSchema, knownAgents, maybeQueueExtraction, maybeQueueRepair, queueMaintenanceJob, recoverStaleMaintenanceJobs } from "./maintenance";
+import { ensureLibrarianSchema, knownAgents, maybeQueueExtraction, maybeQueueRepair, pollBurstFlushEvents, queueMaintenanceJob, recoverStaleMaintenanceJobs } from "./maintenance";
 
 const stateDbPath = process.env.AGENT_STATE_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-state.db");
 const memoryDbPath = process.env.AGENT_MEMORY_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-memory.db");
 const jobsDbPath = process.env.AGENT_JOBS_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-jobs.db");
 const librarianDbPath = process.env.FLEET_LIBRARIAN_DB || join(process.env.META_REPO_ROOT || ".", "runtime/fleet-librarian.db");
+const fleetDbPath = process.env.FLEET_DB || join(process.env.META_REPO_ROOT || ".", "runtime/fleet.db");
 const stateDb = new Database(stateDbPath);
 const memoryDb = new Database(memoryDbPath);
 const jobsDb = new Database(jobsDbPath);
 const librarianDb = new Database(librarianDbPath);
+const fleetDb = new Database(fleetDbPath);
 const jobsBin = process.env.AGENT_JOBS_BIN || "agent-jobs";
 const loopSleepMs = Math.max(10_000, parseInt(process.env.FLEET_LIBRARIAN_INTERVAL_MS || "60000", 10) || 60000);
 const repairErrorThreshold = Math.max(1, parseInt(process.env.FLEET_MEMORY_REPAIR_AFTER_ERRORS || "3", 10) || 3);
@@ -35,7 +37,7 @@ if (Bun.argv[2] === "skill") {
   process.exit(0);
 }
 
-for (const db of [stateDb, memoryDb, jobsDb, librarianDb]) {
+for (const db of [stateDb, memoryDb, jobsDb, librarianDb, fleetDb]) {
   db.exec("PRAGMA busy_timeout = 5000;");
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA synchronous = NORMAL;");
@@ -47,6 +49,7 @@ async function main() {
   while (true) {
     const agents = knownAgents(stateDb);
     recoverStaleMaintenanceJobs(librarianDb, jobsBin, agents, staleClaimMs);
+    pollBurstFlushEvents(fleetDb, librarianDb, jobsDb, jobsBin);
     for (const agent of agents) {
       queueMaintenanceJob(librarianDb, jobsDb, jobsBin, agent);
       maybeQueueExtraction(memoryDb, librarianDb, jobsDb, jobsBin, agent);
