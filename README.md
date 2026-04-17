@@ -102,6 +102,10 @@ Key env vars (all have defaults):
 | `INFERENCE_LOCAL_SMALL_SOCKET` | Small inference worker socket |
 | `INFERENCE_LOCAL_MEDIUM_SOCKET` | Medium inference worker socket |
 | `INFERENCE_LOCAL_RERANK_SOCKET` | Reranker worker socket |
+| `FLEET_TURN_TIMEOUT_MS` | Global turn timeout fallback for all profiles |
+| `FLEET_LIGHT_TIMEOUT_MS` | Light-profile turn timeout override |
+| `FLEET_FULL_TIMEOUT_MS` | Full-profile turn timeout override |
+| `FLEET_MAX_TIMEOUT_MS` | Max-profile turn timeout override |
 | `AGENT_MAIL_DB` | Transport database path |
 | `AGENT_JOBS_DB` | Job queue database path |
 | `AGENT_MEMORY_DB` | Memory database path |

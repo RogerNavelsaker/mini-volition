@@ -2,8 +2,15 @@ id: mini-volition-5bc1
 title: Job Dependency Schema
 seed: mini-volition-5bc1
 spec: mini-volition-5bc1
-status: active
+status: done
 createdAt: "2026-04-15T20:40:53.397Z"
-updatedAt: "2026-04-15T20:40:53.397Z"
+updatedAt: "2026-04-17T15:19:58.504Z"
+completedAt: "2026-04-17T15:19:58.503Z"
+completionSummary: fleet_job_dependencies table, addJobDependency/pendingBlockers/unblockDependents in core.ts, depend CLI command, auto-unblock on complete/cancel, rebuild support, 20 unit tests — all passing
 summary: Plan to address Job Dependency Schema
 steps:
+  - Add job_dependencies table to ensureJobSchema in core.ts
+  - Add addJobDependency, pendingBlockers, unblockDependents to core.ts
+  - Add depend CLI command and wire complete to auto-unblock in main.ts
+  - Write bun tests for dependency schema
+  - Update rebuild/verify for dependency integrity
