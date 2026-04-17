@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 import { appendActionArtifact, appendReviewArtifact, appendRuntimeArtifact, appendTurnArtifact } from "../state-artifacts/lib";
 import { ensureSchema } from "./schema";
+import { detectGhosts, markGhost, recordGhostTransition } from "./ghost";
 
 const dbPath = process.env.AGENT_STATE_DB || join(process.env.META_REPO_ROOT || ".", "runtime/agent-state.db");
 const db = new Database(dbPath);
@@ -834,6 +835,18 @@ if (cmd === "get") {
     process.exit(64);
   }
   replayTurn(arg1, arg2);
+} else if (cmd === "ghost-check") {
+  const staleMs = arg1 ? Math.max(5_000, Number(arg1)) : 120_000;
+  const ghosts = detectGhosts(db, staleMs);
+  const marked: Array<{ agent: string; reason: string }> = [];
+  for (const ghost of ghosts) {
+    const reason = `stale active status '${ghost.status}' for ${Math.round(ghost.stale_ms / 1000)}s`;
+    if (markGhost(db, ghost.agent_name, reason)) {
+      recordGhostTransition(db, ghost.agent_name, reason);
+      marked.push({ agent: ghost.agent_name, reason });
+    }
+  }
+  console.log(JSON.stringify({ ghosts_detected: ghosts.length, ghosts_marked: marked.length, marked }));
 } else {
   usage();
 }
