@@ -1,0 +1,10 @@
+id: mini-volition-87f2
+title: Task-driven Pre-fetch Poller
+seed: mini-volition-87f2
+status: active
+createdAt: "2026-04-15T20:40:56.209Z"
+updatedAt: "2026-04-17T10:23:40.694Z"
+objective: Implement the required components, add tests, and verify the changes.
+constraints:
+acceptance:
+references:

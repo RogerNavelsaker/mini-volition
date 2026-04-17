@@ -1,0 +1,12 @@
+id: mini-volition-11d7
+title: Atomic Memory Promotion
+seed: mini-volition-11d7
+spec: mini-volition-11d7
+status: active
+createdAt: "2026-04-15T14:56:12.987Z"
+updatedAt: "2026-04-15T14:56:12.987Z"
+summary: Implement transactional memory promotion in the librarian.
+steps:
+  - 1. Refactor the librarian maintenance loops to use SQLite transactions.
+  - 2. Implement 'All-or-Nothing' rollbacks for failed summarization or indexing.
+  - 3. Add verification checks after promotion to ensure data integrity.

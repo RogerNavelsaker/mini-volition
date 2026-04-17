@@ -1,0 +1,14 @@
+id: mini-volition-c9a9
+title: Split-brain per-profile retry/timeout
+seed: mini-volition-c9a9
+status: active
+createdAt: "2026-04-15T12:43:14.780Z"
+updatedAt: "2026-04-15T17:27:17.766Z"
+objective: Formalize the split-brain timing policy. Light turns (Flash lookups) require aggressive deadman timeouts (e.g., 15s) to maintain system responsiveness. Full/Max turns (Reasoning/Executive) require more headroom (e.g., 120s-300s). Implement profile-aware retry logic that uses different backoff strategies based on turn importance.
+constraints:
+  - Timeouts must be enforced at the harness level, killing the ACP session if exceeded.
+  - Retry counts must be finite and logged.
+acceptance:
+  - Harness kills light turns that exceed their 15s budget.
+  - Retry logic correctly transitions a failed light turn to a full profile re-run if configured.
+references:

@@ -1,0 +1,12 @@
+id: mini-volition-11d7
+title: Atomic Memory Promotion
+seed: mini-volition-11d7
+status: active
+createdAt: "2026-04-15T14:56:12.930Z"
+updatedAt: "2026-04-15T14:56:12.930Z"
+objective: Ensure the memory librarian uses atomic SQLite transactions for promoting artifacts between tiers (Tier 1 -> Tier 2 -> Tier 3) to prevent data loss or corruption during crashes.
+constraints:
+  - Must use BEGIN TRANSACTION for multi-step promotion.
+acceptance:
+  - Memory promotion is crash-safe and all-or-nothing.
+references:

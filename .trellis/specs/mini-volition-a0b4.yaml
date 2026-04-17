@@ -1,0 +1,10 @@
+id: mini-volition-a0b4
+title: Deterministic Invalidation Rules
+seed: mini-volition-a0b4
+status: active
+createdAt: "2026-04-15T20:41:00.466Z"
+updatedAt: "2026-04-17T10:23:41.151Z"
+objective: Implement the required components, add tests, and verify the changes.
+constraints:
+acceptance:
+references:

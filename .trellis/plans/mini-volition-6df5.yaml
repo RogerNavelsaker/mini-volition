@@ -1,0 +1,12 @@
+id: mini-volition-6df5
+title: Roamer Protocol
+seed: mini-volition-6df5
+spec: mini-volition-6df5
+status: active
+createdAt: "2026-04-15T14:56:12.765Z"
+updatedAt: "2026-04-15T14:56:12.765Z"
+summary: Implement proactive background roaming logic.
+steps:
+  - 1. Define RoamerAction and roamer-specific prompt context.
+  - 2. Implement a background loop in the harness that triggers roaming turns at a configured interval.
+  - 3. Implement heuristic 'anomaly seek' logic (error scanning, staleness checks).

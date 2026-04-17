@@ -1,0 +1,15 @@
+id: mini-volition-a19e
+title: Richer job semantics
+seed: mini-volition-a19e
+status: active
+createdAt: "2026-04-15T12:43:14.668Z"
+updatedAt: "2026-04-15T17:27:17.711Z"
+objective: Extend the internal job system to support complex execution graphs. Jobs must be able to declare dependencies on other jobs (e.g., Job B waits for Job A). Implement unblock policies that evaluate when a job's dependencies are met. Add lifecycle actions for rescheduling (with exponential backoff) and cancellation (manual or policy-driven).
+constraints:
+  - Circular dependencies must be detected and rejected at queue-time.
+  - Job state transitions must be logged to the audit log.
+acceptance:
+  - A job correctly waits in 'blocked' state until its dependency is 'closed'.
+  - Operator views show the depth and bread of the job dependency tree.
+  - Cancellation of a parent job correctly handles descendant jobs (cascade or orphan).
+references:

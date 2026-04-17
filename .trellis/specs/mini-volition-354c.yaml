@@ -1,0 +1,13 @@
+id: mini-volition-354c
+title: Stronger governor
+seed: mini-volition-354c
+status: active
+createdAt: "2026-04-15T12:43:15.107Z"
+updatedAt: "2026-04-15T17:41:06.741Z"
+objective: Enhance the governor with advanced work conservation and burst suppression. Implement refractory intervals that scale with turn complexity, urgent override rules for critical system messages, and an interrupt policy that allows higher-priority wakes to preempt active cooldowns. The goal is to maximize throughput for critical work while strictly enforcing rate limits for low-priority chatter.
+constraints:
+  - Urgent messages must ALWAYS bypass standard cooldown.
+  - Burst suppression must calculate 'velocity' over a sliding 5-minute window.
+acceptance:
+  - Governor successfully suppresses a burst of 10 low-priority mail messages while allowing an immediate wake for an 'urgent' job.
+references:

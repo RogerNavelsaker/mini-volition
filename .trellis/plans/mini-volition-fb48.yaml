@@ -1,0 +1,12 @@
+id: mini-volition-fb48
+title: Soft-delete with GC
+seed: mini-volition-fb48
+spec: mini-volition-fb48
+status: active
+createdAt: "2026-04-15T12:44:00.938Z"
+updatedAt: "2026-04-15T12:44:00.938Z"
+summary: Implement memory garbage collection in the librarian.
+steps:
+  - 1. Define retention policies in the librarian configuration.
+  - 2. Implement a 'gc' maintenance phase to identify and delete stale artifacts.
+  - 3. Add cleanup tasks for FTS5 and search index orphans.

@@ -1,0 +1,10 @@
+id: mini-volition-9207
+title: Burst Flushed Event Signal
+seed: mini-volition-9207
+status: active
+createdAt: "2026-04-15T20:40:58.870Z"
+updatedAt: "2026-04-17T10:23:40.921Z"
+objective: Implement the required components, add tests, and verify the changes.
+constraints:
+acceptance:
+references:

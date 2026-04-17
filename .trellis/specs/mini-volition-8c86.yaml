@@ -1,0 +1,10 @@
+id: mini-volition-8c86
+title: Append-only Log Store
+seed: mini-volition-8c86
+status: active
+createdAt: "2026-04-15T20:40:57.808Z"
+updatedAt: "2026-04-17T10:23:40.807Z"
+objective: Implement the required components, add tests, and verify the changes.
+constraints:
+acceptance:
+references:

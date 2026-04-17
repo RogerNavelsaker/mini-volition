@@ -1,0 +1,13 @@
+id: mini-volition-485d
+title: Heartbeat & Health Alerts
+seed: mini-volition-485d
+status: active
+createdAt: "2026-04-15T14:56:13.156Z"
+updatedAt: "2026-04-15T14:56:13.156Z"
+objective: Implement a dedicated heartbeat monitor that tracks the health of all agent processes and alerts the operator if an agent crashes or hangs.
+constraints:
+  - Must distinguish between 'Active', 'Latent', and 'Dead' states.
+acceptance:
+  - The system detects and reports agent process failures.
+  - Health status is updated in the fleet_agent_state table.
+references:

@@ -1,0 +1,9 @@
+id: mini-volition-0b5e
+title: Worker Failover & Fallback Logic
+seed: mini-volition-0b5e
+spec: mini-volition-0b5e
+status: active
+createdAt: "2026-04-15T20:40:58.745Z"
+updatedAt: "2026-04-15T20:40:58.745Z"
+summary: Plan to address Worker Failover & Fallback Logic
+steps:

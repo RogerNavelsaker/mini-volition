@@ -1,0 +1,12 @@
+id: mini-volition-942d
+title: Reactive Social Digest
+seed: mini-volition-942d
+spec: mini-volition-942d
+status: active
+createdAt: "2026-04-15T14:29:58.379Z"
+updatedAt: "2026-04-15T14:29:58.379Z"
+summary: Implement reactive triggering for the digest service.
+steps:
+  - 1. Modify agent-mail to emit a 'burst_flushed' event or flag in the DB.
+  - 2. Update fleet-digest to wait for the trigger before processing new bursts.
+  - 3. Implement a fallback polling mechanism for robustness.

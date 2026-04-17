@@ -1,0 +1,12 @@
+id: mini-volition-0900
+title: Contradiction detection
+seed: mini-volition-0900
+status: active
+createdAt: "2026-04-15T12:44:01.097Z"
+updatedAt: "2026-04-15T17:41:32.665Z"
+objective: "Implement proactive memory contradiction detection. The librarian will use a 'Smart-when-it-can, Deterministic-when-it-must' pattern: model-based heuristics (fleet-heavy) will propose likely conflicts between old and new facts, while exact invalidation rules (e.g., 'Status: Closed' vs 'Status: Open') will confirm the conflict. Confirming a contradiction triggers an automatic 'invalidate' action on the stale artifact."
+constraints:
+  - Conflicts must be flagged for agent review before final invalidation.
+acceptance:
+  - Librarian identifies and flags a conflict when two facts about 'Server IP' differ.
+references:

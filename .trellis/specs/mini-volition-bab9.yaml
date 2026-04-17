@@ -1,0 +1,17 @@
+id: mini-volition-bab9
+title: Extend queue-backed dispatcher
+seed: mini-volition-bab9
+status: active
+createdAt: "2026-04-15T12:01:55.096Z"
+updatedAt: "2026-04-16T14:41:13.169Z"
+objective: Dispatcher orchestration.
+constraints:
+  - All side-effects must be idempotent or journal-checked before execution.
+  - The journal must persist in SQLite (agent-state.db) and the durable JSONL record.
+  - The turn recovery logic must be able to reconstruct the 'hot' action queue from the journal.
+acceptance:
+  - Action-by-action logging in working.log using TDD notation.
+  - Resume logic successfully skips completed actions and picks up at the first 'planned' or 'started' (but not completed) action.
+  - Zero duplicate mail sends during a resume cycle.
+  - Unrecognized actions immediately halt the queue and trigger an operator escalation.
+references:

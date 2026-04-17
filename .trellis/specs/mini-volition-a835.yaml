@@ -1,0 +1,10 @@
+id: mini-volition-a835
+title: Notification Channel Integration
+seed: mini-volition-a835
+status: active
+createdAt: "2026-04-15T20:40:54.964Z"
+updatedAt: "2026-04-17T10:23:41.264Z"
+objective: Implement the required components, add tests, and verify the changes.
+constraints:
+acceptance:
+references:

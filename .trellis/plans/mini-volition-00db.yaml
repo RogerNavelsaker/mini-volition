@@ -1,0 +1,12 @@
+id: mini-volition-00db
+title: Optimize GPU Muscle Offload
+seed: mini-volition-00db
+spec: mini-volition-00db
+status: active
+createdAt: "2026-04-15T12:43:15.270Z"
+updatedAt: "2026-04-15T12:43:15.270Z"
+summary: Enhance local offload efficiency and reliability.
+steps:
+  - 1. Audit and refine fleet-* socket communication for resilience.
+  - 2. Implement enhanced load-balancing for local inference workers.
+  - 3. Optimize data serialization/deserialization for inference offload.

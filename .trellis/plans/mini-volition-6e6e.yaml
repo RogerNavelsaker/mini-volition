@@ -1,0 +1,12 @@
+id: mini-volition-6e6e
+title: Multi-source wake orchestration
+seed: mini-volition-6e6e
+spec: mini-volition-6e6e
+status: active
+createdAt: "2026-04-15T12:43:15.053Z"
+updatedAt: "2026-04-15T12:43:15.053Z"
+summary: Extend wake orchestration to non-mail/non-job sources.
+steps:
+  - 1. Expand WakeSource and WakeEvent types to include alarms, reminders, and subprocesses.
+  - 2. Implement listeners/pollers for new wake sources in the harness.
+  - 3. Update turn assembly to correctly identify and prioritize new wake sources.

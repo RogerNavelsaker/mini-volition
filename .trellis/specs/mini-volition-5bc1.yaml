@@ -1,0 +1,10 @@
+id: mini-volition-5bc1
+title: Job Dependency Schema
+seed: mini-volition-5bc1
+status: active
+createdAt: "2026-04-15T20:40:53.336Z"
+updatedAt: "2026-04-17T10:23:40.462Z"
+objective: Implement the required components, add tests, and verify the changes.
+constraints:
+acceptance:
+references:
