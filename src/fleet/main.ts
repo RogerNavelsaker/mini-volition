@@ -396,6 +396,13 @@ function withDb<T>(fn: (db: Database) => T): T {
     last_reason TEXT,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
+  db.run(`CREATE TABLE IF NOT EXISTS fleet_event_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    agent_name TEXT,
+    payload_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
   try {
     return fn(db);
   } finally {
@@ -409,6 +416,30 @@ function isoAfterSeconds(seconds: number): string {
 
 function currentGovernor(db: Database, agent: string) {
   return (db.prepare("SELECT * FROM fleet_governor WHERE agent_name = ?").get(agent) as any) ?? null;
+}
+
+function logEvent(eventType: string, agentName: string | null, payloadJson: string | null) {
+  return withDb((db) => {
+    const result = db.prepare(
+      `INSERT INTO fleet_event_log (event_type, agent_name, payload_json) VALUES (?, ?, ?)`,
+    ).run(eventType, agentName ?? null, payloadJson ?? null);
+    return { ok: true, id: result.lastInsertRowid };
+  });
+}
+
+function listEvents(agentName: string | null, limit: number) {
+  return withDb((db) => {
+    if (agentName) {
+      return db.prepare(
+        `SELECT id, event_type, agent_name, payload_json, created_at FROM fleet_event_log
+         WHERE agent_name = ? ORDER BY id DESC LIMIT ?`,
+      ).all(agentName, limit);
+    }
+    return db.prepare(
+      `SELECT id, event_type, agent_name, payload_json, created_at FROM fleet_event_log
+       ORDER BY id DESC LIMIT ?`,
+    ).all(limit);
+  });
 }
 
 function governorStatus(agent: string, windowSec: number, turnLimit: number) {
@@ -657,6 +688,12 @@ switch (process.argv[2]) {
     genesisSession();
     startSession();
     attachSession();
+    break;
+  case "log-event":
+    console.log(JSON.stringify(logEvent(process.argv[3] || "", process.argv[4] ?? null, process.argv[5] ?? null)));
+    break;
+  case "list-events":
+    console.log(JSON.stringify(listEvents(process.argv[3] ?? null, Math.max(1, parseInt(process.argv[4] || "20", 10) || 20))));
     break;
   default:
     usage();
