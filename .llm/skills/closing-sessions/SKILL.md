@@ -35,7 +35,7 @@ Tier 1 Close:
          git merge --no-ff <slug> -m "merge: <slug> (#<issue-id>)"
 - [ ] 6. Verify post-merge:     bun run scripts/build.ts && bun test
 - [ ] 7. Close the issue:       sd close <issue-id>
-- [ ] 8. Sync state dirs:       sd sync && ml sync && tl sync && cn sync
+- [ ] 8. Sync state dirs:       sd sync && ml sync && tl sync && cn sync && fx sync
 - [ ] 9. Retire the feature worktree:
          cd <main-worktree>
          git worktree remove worktrees/<slug>
@@ -43,6 +43,7 @@ Tier 1 Close:
 ```
 
 `tl sync` stages and commits any pending `.trellis/` changes with a generated body listing what moved — use it rather than `git add .trellis/` to keep the message consistent.
+`fx sync` stages and commits `.flox/env/manifest.toml` and `.flox/env/manifest.lock` as `chore: sync flox env`.
 
 ### Rollback (tier 1)
 

@@ -4,6 +4,7 @@ build/
 dist/
 lib/onnxruntime/
 node_modules/
+__pycache__/
 zellij-*/
 bin/
 scratchpads/

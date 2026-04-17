@@ -118,6 +118,7 @@ Provisioned via flox flakes. Available on the development path:
 - **`ml`** (mulch) -- durable knowledge records under `./.mulch/`
 - **`tl`** (trellis) -- specs, plans, handoffs under `./.trellis/`
 - **`cn`** (canopy) -- prompt management and sub-agent spawning under `./.canopy/`
+- **`fx`** (flox env) -- env manifest and lock under `./.flox/env/`
 - **`phloem`** -- minimal inter-agent message log under `./.phloem/` (source: `.llm/skills/coordinating-agents/`)
 - `git`, `gh`, `bun`, plus standard Linux (`diff`, `patch`, `grep`/`rg`, `find`, `jq`, `awk`, `sed`)
 
