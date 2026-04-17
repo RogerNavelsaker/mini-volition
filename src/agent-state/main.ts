@@ -33,6 +33,85 @@ if (Bun.argv[2] === "skill") {
 
 const [, , cmd, arg1, arg2] = Bun.argv;
 const nullableArg = (value: string | undefined | null) => (value === undefined || value === null || value === "" ? null : value);
+const RUNTIME_STATUSES = ["idle", "thinking", "cooldown", "sleeping", "rate_limited", "error"] as const;
+type RuntimeStatus = (typeof RUNTIME_STATUSES)[number];
+type RuntimeStateRow = {
+  status: RuntimeStatus;
+  current_task: string | null;
+  wake_reason: string | null;
+  last_error: string | null;
+  cooldown_until: string | null;
+  last_message_id: number | null;
+};
+const ALLOWED_STATUS_TRANSITIONS: Record<RuntimeStatus, Set<RuntimeStatus>> = {
+  idle: new Set(["idle", "thinking", "cooldown", "error"]),
+  thinking: new Set(["thinking", "idle", "cooldown", "sleeping", "rate_limited", "error"]),
+  cooldown: new Set(["cooldown", "idle", "thinking", "error"]),
+  sleeping: new Set(["sleeping", "idle", "thinking", "error"]),
+  rate_limited: new Set(["rate_limited", "cooldown", "idle", "thinking", "error"]),
+  error: new Set(["error", "idle", "thinking", "cooldown"]),
+};
+
+function isRuntimeStatus(value: string): value is RuntimeStatus {
+  return (RUNTIME_STATUSES as readonly string[]).includes(value);
+}
+
+function normalizeRuntimeState(
+  status: RuntimeStatus,
+  currentTask: string | null,
+  wakeReason: string | null,
+  lastError: string | null,
+  cooldownUntil: string | null,
+  lastMessageId: number | null,
+): RuntimeStateRow {
+  if (status === "idle") {
+    return {
+      status,
+      current_task: currentTask,
+      wake_reason: wakeReason,
+      last_error: null,
+      cooldown_until: null,
+      last_message_id: lastMessageId,
+    };
+  }
+
+  if (status === "thinking") {
+    return {
+      status,
+      current_task: currentTask,
+      wake_reason: wakeReason,
+      last_error: null,
+      cooldown_until: null,
+      last_message_id: lastMessageId,
+    };
+  }
+
+  if (status === "cooldown" || status === "sleeping" || status === "rate_limited") {
+    return {
+      status,
+      current_task: currentTask,
+      wake_reason: wakeReason,
+      last_error: lastError,
+      cooldown_until: cooldownUntil,
+      last_message_id: lastMessageId,
+    };
+  }
+
+  return {
+    status,
+    current_task: currentTask,
+    wake_reason: wakeReason,
+    last_error: lastError,
+    cooldown_until: null,
+    last_message_id: lastMessageId,
+  };
+}
+
+function validateRuntimeTransition(previous: RuntimeStatus | null, next: RuntimeStatus) {
+  if (!previous) return;
+  if (ALLOWED_STATUS_TRANSITIONS[previous].has(next)) return;
+  throw new Error(`invalid runtime state transition: ${previous} -> ${next}`);
+}
 
 function usage(): never {
   console.error("Usage: agent-state <get|set|subscription-get|subscription-set|subscription-list|record-action|record-actions-batch|record-turn-events-batch|rebuild|verify|list-actions|list-turns|list-checkpoints|get-checkpoint|recover-turns|review-turns|resolve-turn|replay-turn> ...");
@@ -639,6 +718,27 @@ if (cmd === "get") {
     console.error("Usage: agent-state set <agent> <status> [currentTask] [wakeReason] [lastError] [cooldownUntil] [lastMessageId]");
     process.exit(64);
   }
+  if (!isRuntimeStatus(arg2)) {
+    console.error(`runtime status must be one of: ${RUNTIME_STATUSES.join(", ")}`);
+    process.exit(64);
+  }
+  const previous = db.prepare(
+    "SELECT status, current_task, wake_reason, last_error, cooldown_until, last_message_id FROM fleet_agent_state WHERE agent_name = ? LIMIT 1",
+  ).get(arg1) as RuntimeStateRow | null;
+  try {
+    validateRuntimeTransition(previous?.status ?? null, arg2);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(64);
+  }
+  const normalized = normalizeRuntimeState(
+    arg2,
+    nullableArg(Bun.argv[5]),
+    nullableArg(Bun.argv[6]),
+    nullableArg(Bun.argv[7]),
+    nullableArg(Bun.argv[8]),
+    nullableArg(Bun.argv[9]) ? Number(Bun.argv[9]) : null,
+  );
   db.run(
     `INSERT INTO fleet_agent_state (agent_name, status, current_task, wake_reason, last_error, cooldown_until, last_message_id, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -652,22 +752,22 @@ if (cmd === "get") {
        updated_at = CURRENT_TIMESTAMP`,
     [
       arg1,
-      arg2,
-      nullableArg(Bun.argv[5]),
-      nullableArg(Bun.argv[6]),
-      nullableArg(Bun.argv[7]),
-      nullableArg(Bun.argv[8]),
-      nullableArg(Bun.argv[9]) ? Number(Bun.argv[9]) : null,
+      normalized.status,
+      normalized.current_task,
+      normalized.wake_reason,
+      normalized.last_error,
+      normalized.cooldown_until,
+      normalized.last_message_id,
     ],
   );
   appendRuntimeArtifact(arg1, {
     record_type: "runtime_state",
-    status: arg2,
-    current_task: nullableArg(Bun.argv[5]),
-    wake_reason: nullableArg(Bun.argv[6]),
-    last_error: nullableArg(Bun.argv[7]),
-    cooldown_until: nullableArg(Bun.argv[8]),
-    last_message_id: nullableArg(Bun.argv[9]) ? Number(Bun.argv[9]) : null,
+    status: normalized.status,
+    current_task: normalized.current_task,
+    wake_reason: normalized.wake_reason,
+    last_error: normalized.last_error,
+    cooldown_until: normalized.cooldown_until,
+    last_message_id: normalized.last_message_id,
   });
 } else if (cmd === "subscription-get") {
   if (!arg1 || !arg2) {
