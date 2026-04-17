@@ -12,8 +12,8 @@ Shape work before coding. Combines seeds (tasks), mulch (prior art), and trellis
    - **Issues**: Focus strictly on the goal/problem.
 3. **Plan**: Use `tl plan create` for actionable steps (one logical change per commit).
    - **Plans**: Focus strictly on the execution steps and sequence.
-4. **Isolate**: Initialize feature worktree: `git worktree add worktrees/<slug> -b <slug> integration`.
-5. **Link**: Connect via `sd update <issue-id> --body "plan: <slug>, branch: <slug>"`.
+- **Isolate**: Initialize feature worktree: `git worktree add ../mv-<slug> -b <slug> integration`.
+- **Link**: Connect via `sd update <issue-id> --body "plan: <slug>, branch: <slug>, assignee: @<agent>"`.
 
 ## Data Management & Nushell
 Manage, align, and sync items cleanly using `nu` batch queries to check consistency and avoid duplication.
