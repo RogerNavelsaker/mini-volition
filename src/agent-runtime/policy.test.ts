@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { turnProfileConfig, retryConfig } from "./policy";
+import { turnProfileConfig, retryConfig, clampTurnProfile, chooseTurnProfileWithBounds } from "./policy";
 
 describe("turnProfileConfig", () => {
   test("uses global timeout as fallback for every profile", () => {
@@ -66,5 +66,65 @@ describe("retryConfig", () => {
   test("backoff increases with profile weight", () => {
     expect(retryConfig("light").backoffMs).toBeLessThan(retryConfig("full").backoffMs);
     expect(retryConfig("full").backoffMs).toBeLessThan(retryConfig("max").backoffMs);
+  });
+});
+
+describe("clampTurnProfile", () => {
+  test("returns profile unchanged when within floor and ceiling", () => {
+    expect(clampTurnProfile("full", "light", "max")).toBe("full");
+  });
+
+  test("raises profile to floor when below floor", () => {
+    expect(clampTurnProfile("light", "full", "max")).toBe("full");
+  });
+
+  test("lowers profile to ceiling when above ceiling", () => {
+    expect(clampTurnProfile("max", "light", "full")).toBe("full");
+  });
+
+  test("returns floor when floor equals ceiling", () => {
+    expect(clampTurnProfile("light", "full", "full")).toBe("full");
+    expect(clampTurnProfile("max", "full", "full")).toBe("full");
+  });
+
+  test("defaults floor=light, ceiling=max (no clamping)", () => {
+    expect(clampTurnProfile("light")).toBe("light");
+    expect(clampTurnProfile("full")).toBe("full");
+    expect(clampTurnProfile("max")).toBe("max");
+  });
+
+  test("clamps light→full when floor=full", () => {
+    expect(clampTurnProfile("light", "full")).toBe("full");
+  });
+
+  test("clamps max→light when ceiling=light", () => {
+    expect(clampTurnProfile("max", "light", "light")).toBe("light");
+  });
+});
+
+describe("chooseTurnProfileWithBounds", () => {
+  const internalJob: "internal_job" = "internal_job";
+  const urgentBurst = { primary: { layer: "urgent" }, messages: [{ body: "critical outage" }] };
+  const lightBurst = { primary: { layer: "public" }, messages: [{ body: "fyi receipt acknowledged" }] };
+  const normalBurst = { primary: { layer: "public" }, messages: [{ body: "please review" }] };
+
+  test("chooseTurnProfile selects max for urgent; ceiling=full clamps to full", () => {
+    const result = chooseTurnProfileWithBounds(internalJob, urgentBurst, "light", "full");
+    expect(result).toBe("full");
+  });
+
+  test("chooseTurnProfile selects light; floor=full raises to full", () => {
+    const result = chooseTurnProfileWithBounds("mail_burst", lightBurst, "full", "max");
+    expect(result).toBe("full");
+  });
+
+  test("no bounds applied when floor=light, ceiling=max", () => {
+    const light = chooseTurnProfileWithBounds("mail_burst", lightBurst, "light", "max");
+    expect(light).toBe("light");
+  });
+
+  test("preserves full when no clamping needed", () => {
+    const result = chooseTurnProfileWithBounds("mail_burst", normalBurst, "light", "max");
+    expect(result).toBe("full");
   });
 });

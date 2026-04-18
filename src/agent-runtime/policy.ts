@@ -96,3 +96,27 @@ export function retryConfig(profile: TurnProfile): RetryConfig {
   if (profile === "max") return { maxAttempts: 4, backoffMs: 3_000, backoffMultiplier: 2.0 };
   return { maxAttempts: 3, backoffMs: 2_000, backoffMultiplier: 2.0 };
 }
+
+const PROFILE_RANK: Record<TurnProfile, number> = { light: 0, full: 1, max: 2 };
+const PROFILE_BY_RANK: TurnProfile[] = ["light", "full", "max"];
+
+export function clampTurnProfile(
+  profile: TurnProfile,
+  floor: TurnProfile = "light",
+  ceiling: TurnProfile = "max",
+): TurnProfile {
+  const rank = Math.min(
+    PROFILE_RANK[ceiling],
+    Math.max(PROFILE_RANK[floor], PROFILE_RANK[profile]),
+  );
+  return PROFILE_BY_RANK[rank];
+}
+
+export function chooseTurnProfileWithBounds(
+  source: TurnWakeSource,
+  burst: TurnPolicyBurst,
+  floor: TurnProfile = "light",
+  ceiling: TurnProfile = "max",
+): TurnProfile {
+  return clampTurnProfile(chooseTurnProfile(source, burst), floor, ceiling);
+}
