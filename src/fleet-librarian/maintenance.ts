@@ -176,3 +176,105 @@ export function maybeQueueRepair(memoryDb: Database, librarianDb: Database, jobs
     console.error(`Failed to queue repair job for ${agentName}`, error);
   }
 }
+
+export type OrphanCleanResult = {
+  orphaned_search_index: number;
+  orphaned_facts: number;
+  orphaned_links: number;
+};
+
+export function countOrphanedIndex(memoryDb: Database, agentName: string): OrphanCleanResult {
+  const orphanedSearch = (memoryDb.prepare(
+    `SELECT COUNT(*) AS cnt FROM agent_memory_search_index si
+     WHERE si.record_kind = 'compaction_item'
+       AND NOT EXISTS (SELECT 1 FROM agent_memory_compaction_items ci WHERE ci.id = si.record_id)
+       AND (si.agent_name = ? OR si.agent_name IS NULL)`,
+  ).get(agentName) as { cnt: number } | null)?.cnt ?? 0;
+
+  const orphanedFacts = (memoryDb.prepare(
+    `SELECT COUNT(*) AS cnt FROM agent_memory_facts f
+     WHERE f.agent_name = ?
+       AND NOT EXISTS (SELECT 1 FROM agent_memory_compaction_items ci WHERE ci.id = f.source_item_id)`,
+  ).get(agentName) as { cnt: number } | null)?.cnt ?? 0;
+
+  const orphanedLinks = (memoryDb.prepare(
+    `SELECT COUNT(*) AS cnt FROM agent_memory_links l
+     WHERE l.agent_name = ?
+       AND (
+         NOT EXISTS (SELECT 1 FROM agent_memory_compaction_items ci WHERE ci.id = l.from_item_id)
+         OR NOT EXISTS (SELECT 1 FROM agent_memory_compaction_items ci WHERE ci.id = l.to_item_id)
+       )`,
+  ).get(agentName) as { cnt: number } | null)?.cnt ?? 0;
+
+  return { orphaned_search_index: orphanedSearch, orphaned_facts: orphanedFacts, orphaned_links: orphanedLinks };
+}
+
+export function cleanOrphanedIndex(memoryDb: Database, librarianDb: Database, agentName: string): OrphanCleanResult {
+  const before = countOrphanedIndex(memoryDb, agentName);
+  if (before.orphaned_search_index === 0 && before.orphaned_facts === 0 && before.orphaned_links === 0) {
+    return before;
+  }
+
+  memoryDb.run(
+    `DELETE FROM agent_memory_search_index
+     WHERE record_kind = 'compaction_item'
+       AND (agent_name = ? OR agent_name IS NULL)
+       AND NOT EXISTS (SELECT 1 FROM agent_memory_compaction_items ci WHERE ci.id = record_id)`,
+    [agentName],
+  );
+
+  memoryDb.run(
+    `DELETE FROM agent_memory_facts
+     WHERE agent_name = ?
+       AND NOT EXISTS (SELECT 1 FROM agent_memory_compaction_items ci WHERE ci.id = source_item_id)`,
+    [agentName],
+  );
+
+  memoryDb.run(
+    `DELETE FROM agent_memory_links
+     WHERE agent_name = ?
+       AND (
+         NOT EXISTS (SELECT 1 FROM agent_memory_compaction_items ci WHERE ci.id = from_item_id)
+         OR NOT EXISTS (SELECT 1 FROM agent_memory_compaction_items ci WHERE ci.id = to_item_id)
+       )`,
+    [agentName],
+  );
+
+  recordMaintenance(
+    librarianDb,
+    agentName,
+    "clean-index",
+    "completed",
+    `removed search_index:${before.orphaned_search_index} facts:${before.orphaned_facts} links:${before.orphaned_links}`,
+  );
+
+  return before;
+}
+
+export function maybeQueueIndexClean(
+  memoryDb: Database,
+  librarianDb: Database,
+  jobsDb: Database,
+  jobsBin: string,
+  agentName: string,
+  orphanThreshold = 5,
+) {
+  const counts = countOrphanedIndex(memoryDb, agentName);
+  const total = counts.orphaned_search_index + counts.orphaned_facts + counts.orphaned_links;
+  if (total < orphanThreshold) return;
+  const existing = jobsDb.prepare(
+    `SELECT id FROM fleet_internal_jobs
+     WHERE target_agent = ?
+       AND sender = 'fleet-librarian'
+       AND body = '__maintenance__:clean-index'
+       AND status IN ('queued', 'claimed')
+     LIMIT 1`,
+  ).get(agentName) as { id: number } | null;
+  if (existing) return;
+  try {
+    execFileSync(jobsBin, ["queue", agentName, "fleet-librarian", "__maintenance__:clean-index", "low"], { stdio: "ignore" });
+    recordMaintenance(librarianDb, agentName, "clean-index", "queued", `total_orphans:${total}`);
+  } catch (error) {
+    recordMaintenance(librarianDb, agentName, "clean-index", "queue_failed", error instanceof Error ? error.message : String(error));
+  }
+}
