@@ -8,6 +8,7 @@ import { join, dirname } from "path";
 import { ensureSchema as ensureMemorySchema } from "../agent-memory/schema";
 import { appendMemorySourceArtifact } from "../state-artifacts/lib";
 import { buildProviderTargets, executeProviderTargets, type ProviderTurnTarget } from "./failover";
+import { buildProactiveQueries, mergePreparedMemories } from "./context";
 import { chooseRetrievalMode, chooseTurnProfile, classifySourceGroup, randomizedCooldownMs, refractoryCooldownMs, turnProfileConfig, wakeClassFor as schedulerWakeClassFor, type RetrievalMode, type TurnProfile, type WakeClass, type WakeSource, type WakeSourceGroup } from "./policy";
 import { ensureTurnJournal, recoverInterruptedTurns, replayPolicyForAction, type TurnCheckpoint, type TurnPhase } from "./recovery";
 
@@ -59,6 +60,7 @@ const BUDGET_TRACE_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_TRACE
 const BUDGET_TIMELINE_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_TIMELINE || "1400", 10) || 1400);
 const BUDGET_FACTS_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_FACTS || "1400", 10) || 1400);
 const BUDGET_INVALIDATED_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_INVALIDATED || "1200", 10) || 1200);
+const PROACTIVE_CONTEXT_QUERIES = Math.max(1, parseInt(process.env.FLEET_PROACTIVE_CONTEXT_QUERIES || "3", 10) || 3);
 
 // --- Output budget communicated to agent (CEP-inspired) ---
 const OUTPUT_BUDGET_CHARS = Math.max(500, parseInt(process.env.FLEET_OUTPUT_BUDGET || "8000", 10) || 8000);
@@ -537,6 +539,14 @@ type MemoryLookup = {
     last_error: string | null;
     artifact_count: number;
     source: string | null;
+  };
+  budget?: {
+    token_budget: number;
+    tokens_used: number;
+    dropped_results: number;
+  };
+  cache?: {
+    hit: boolean;
   };
 };
 const ACTION_ENVELOPE_SCHEMA = {
@@ -1905,7 +1915,11 @@ async function assembleTurnContext(agentName: string, burst: IncomingBurst, wake
     .join("\n")
     .slice(0, 2400);
   const retrievalMode = await chooseRetrievalModeWithInference(wakeSource, burst);
-  const preparedMemory = lookupPreparedMemory(agentName, retrievalQuery, retrievalMode);
+  const proactiveQueries = buildProactiveQueries(burst.messages, PROACTIVE_CONTEXT_QUERIES);
+  const preparedMemory = mergePreparedMemories(
+    proactiveQueries.map((query) => lookupPreparedMemory(agentName, query, retrievalMode)),
+    retrievalMode,
+  );
   if (!preparedMemory || preparedMemory.freshness?.stale || preparedMemory.freshness?.last_status === "error") {
     refreshMemoryAsync(agentName);
   }
