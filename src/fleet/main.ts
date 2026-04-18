@@ -395,6 +395,7 @@ function withDb<T>(fn: (db: Database) => T): T {
     forced_cooldown_until DATETIME,
     last_reason TEXT,
     consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    urgent_preempt INTEGER NOT NULL DEFAULT 0,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
   db.run(`CREATE TABLE IF NOT EXISTS fleet_event_log (
@@ -448,7 +449,7 @@ function governorStatus(agent: string, windowSec: number, turnLimit: number) {
     const rec = currentGovernor(db, agent);
     const now = Date.now();
     const cooldownUntilMs = rec?.forced_cooldown_until ? new Date(rec.forced_cooldown_until.endsWith("Z") ? rec.forced_cooldown_until : `${rec.forced_cooldown_until}Z`).getTime() : 0;
-    const allowedByCooldown = cooldownUntilMs <= now;
+    const inCooldown = cooldownUntilMs > now;
     const windowStartedMs = rec?.window_started_at ? new Date(rec.window_started_at.endsWith("Z") ? rec.window_started_at : `${rec.window_started_at}Z`).getTime() : 0;
     const windowExpired = !windowStartedMs || (now - windowStartedMs) > windowSec * 1000;
 
@@ -459,9 +460,18 @@ function governorStatus(agent: string, windowSec: number, turnLimit: number) {
       );
     }
 
+    const urgentPreempt = (rec?.urgent_preempt ?? 0) === 1;
+    if (urgentPreempt && inCooldown) {
+      db.run(
+        "UPDATE fleet_governor SET urgent_preempt = 0, updated_at = CURRENT_TIMESTAMP WHERE agent_name = ?",
+        [agent],
+      );
+    }
+
     const current = currentGovernor(db, agent);
     return {
-      allowed: allowedByCooldown,
+      allowed: !inCooldown || urgentPreempt,
+      urgent_preempt: urgentPreempt,
       turn_count: current?.turn_count ?? 0,
       turn_limit: turnLimit,
       window_sec: windowSec,
@@ -469,6 +479,25 @@ function governorStatus(agent: string, windowSec: number, turnLimit: number) {
       forced_cooldown_until: current?.forced_cooldown_until ?? null,
       last_reason: current?.last_reason ?? null,
     };
+  });
+}
+
+function governorUrgentPreempt(agent: string) {
+  return withDb((db) => {
+    db.run(
+      `INSERT INTO fleet_governor (agent_name, window_started_at, turn_count, urgent_preempt, updated_at)
+       VALUES (?, CURRENT_TIMESTAMP, 0, 1, CURRENT_TIMESTAMP)
+       ON CONFLICT(agent_name) DO UPDATE SET
+         urgent_preempt = 1,
+         updated_at = CURRENT_TIMESTAMP`,
+      [agent],
+    );
+    appendFleetArtifact("governor", {
+      record_type: "governor",
+      event: "urgent_preempt_set",
+      agent_name: agent,
+    });
+    return { agent_name: agent, urgent_preempt: true };
   });
 }
 
@@ -729,6 +758,9 @@ switch (process.argv[2]) {
     break;
   case "governor-reset-failures":
     console.log(JSON.stringify(governorResetFailures(process.argv[3] || "")));
+    break;
+  case "governor-urgent-preempt":
+    console.log(JSON.stringify(governorUrgentPreempt(process.argv[3] || "")));
     break;
   case "rebuild-governor":
     await rebuildGovernor();
