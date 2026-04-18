@@ -23,6 +23,7 @@ describe("mergePreparedMemories", () => {
         archival: [{ id: 3, reflection: "GitHub Actions builds standalone binaries" }],
         currentFacts: [{ id: 4, subject: "GitHub Actions", predicate: "uses", object: "bun", valid_from: null }],
         linkedArchival: [{ id: 5, relation: "related_context", weight: 0.5, reflection: "Nix builds from source" }],
+        hierarchicalContexts: [{ seed: { id: 6, record_kind: "compaction_item", record_id: 6, source_kind: "archival", content: "bun releases" }, related: [{ tag: "compaction:1", record_kind: "fact", record_id: 4, depth: 1, content: "GitHub Actions uses bun" }] }],
         traces: [{ id: 6, record_kind: "artifact", source_kind: "digest", score: 1, fused_score: 1, top_bonus: 0, lexical_score: 0.2, link_boost: 0, strength: 1, decay_score: 1 }],
         retrievalMode: "mix",
         memorySelection: "initial",
@@ -36,6 +37,7 @@ describe("mergePreparedMemories", () => {
         archival: [{ id: 8, reflection: "Nix builds from source" }],
         currentFacts: [{ id: 4, subject: "GitHub Actions", predicate: "uses", object: "bun", valid_from: null }],
         linkedArchival: [{ id: 5, relation: "related_context", weight: 0.5, reflection: "Nix builds from source" }],
+        hierarchicalContexts: [{ seed: { id: 6, record_kind: "compaction_item", record_id: 6, source_kind: "archival", content: "bun releases" }, related: [{ tag: "compaction:1", record_kind: "fact", record_id: 4, depth: 1, content: "GitHub Actions uses bun" }] }],
         traces: [{ id: 9, record_kind: "compaction_item", source_kind: "archival", score: 0.8, fused_score: 0.7, top_bonus: 0, lexical_score: 0.1, link_boost: 0.1, strength: 1, decay_score: 1 }],
         retrievalMode: "mix",
         memorySelection: "secondary",
@@ -50,6 +52,7 @@ describe("mergePreparedMemories", () => {
     expect(merged?.episodic).toHaveLength(2);
     expect(merged?.currentFacts).toHaveLength(1);
     expect(merged?.linkedArchival).toHaveLength(1);
+    expect(merged?.hierarchicalContexts).toHaveLength(1);
     expect(merged?.traces).toHaveLength(2);
     expect(merged?.budget?.tokens_used).toBe(220);
     expect(merged?.cache?.hit).toBe(true);

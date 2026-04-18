@@ -1380,9 +1380,59 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
          AND linked_item.status = 'active'
        GROUP BY linked_index.id, links.relation, linked_item.content
        ORDER BY weight DESC, linked_index.id DESC
-       LIMIT ?`,
+        LIMIT ?`,
     ).all(...topCompactionTraceIds, agentName, ...topCompactionTraceIds, Math.max(limit * 2, 4)) as LinkedLookupRow[];
   }
+  const topHierarchicalSeeds = budgetedRanked
+    .filter((row) => (row.record_kind === "compaction_item" || row.record_kind === "fact") && row.record_id != null)
+    .slice(0, Math.max(limit, 2));
+  const hierarchicalContexts = topHierarchicalSeeds.map((seed) => {
+    const related = db.prepare(
+      `SELECT lineage.tag,
+              related.record_kind,
+              related.record_id,
+              related.depth,
+              COALESCE(items.content, facts.subject || ' ' || facts.predicate || ' ' || facts.object) AS content
+       FROM agent_memory_lineage_tags seed
+       JOIN agent_memory_lineage_tags related
+         ON related.agent_name = seed.agent_name
+        AND related.tag = seed.tag
+       LEFT JOIN agent_memory_compaction_items items
+         ON related.record_kind = 'compaction_item' AND items.id = related.record_id
+       LEFT JOIN agent_memory_facts facts
+         ON related.record_kind = 'fact' AND facts.id = related.record_id
+       WHERE seed.agent_name = ?
+         AND seed.record_kind = ?
+         AND seed.record_id = ?
+         AND related.record_id != seed.record_id
+       ORDER BY related.depth ASC, related.record_id DESC
+       LIMIT ?`,
+    ).all(agentName, seed.record_kind, seed.record_id, Math.max(limit, 3)) as Array<{
+      tag: string;
+      record_kind: string;
+      record_id: number;
+      depth: number;
+      content: string | null;
+    }>;
+    return {
+      seed: {
+        id: seed.id,
+        record_kind: seed.record_kind ?? "artifact",
+        record_id: seed.record_id ?? null,
+        source_kind: seed.source_kind,
+        content: seed.content,
+      },
+      related: related
+        .filter((row) => row.content)
+        .map((row) => ({
+          tag: row.tag,
+          record_kind: row.record_kind,
+          record_id: row.record_id,
+          depth: row.depth,
+          content: row.content!,
+        })),
+    };
+  }).filter((cluster) => cluster.related.length > 0);
   const payload = JSON.stringify({
     recentDigests: digests,
     episodic,
@@ -1390,6 +1440,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
     currentFacts,
     recentInvalidations,
     linkedArchival,
+    hierarchicalContexts,
     traces,
     memorySelection: rows.length === 0
       ? "memory artifacts unavailable"

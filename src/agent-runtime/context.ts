@@ -16,6 +16,10 @@ export type PreparedMemory = {
     valid_to: string | null;
   }>;
   linkedArchival?: Array<{ id?: number; relation: string; weight: number; reflection: string }>;
+  hierarchicalContexts?: Array<{
+    seed: { id?: number; record_kind: string; record_id?: number | null; source_kind: string; content: string };
+    related: Array<{ tag: string; record_kind: string; record_id: number; depth: number; content: string }>;
+  }>;
   timelineEvents?: Array<{
     id: number;
     relation: string;
@@ -128,6 +132,10 @@ export function mergePreparedMemories(
     available.flatMap((entry) => entry.traces ?? []),
     (row) => `${row.id ?? "trace"}:${row.record_kind}:${row.source_kind}`,
   ).slice(0, 12);
+  const hierarchicalContexts = dedupeByKey(
+    available.flatMap((entry) => entry.hierarchicalContexts ?? []),
+    (row) => `${row.seed.record_kind}:${row.seed.record_id ?? row.seed.id ?? row.seed.content}`,
+  ).slice(0, 6);
 
   const budgets = available.map((entry) => entry.budget).filter(Boolean) as NonNullable<PreparedMemory["budget"]>[];
   const cacheHits = available.some((entry) => Boolean(entry.cache?.hit));
@@ -138,6 +146,7 @@ export function mergePreparedMemories(
     currentFacts,
     recentInvalidations,
     linkedArchival,
+    hierarchicalContexts,
     traces,
     retrievalMode: mode,
     memorySelection: `${freshest.memorySelection}; proactive_queries=${available.length}`,

@@ -60,6 +60,7 @@ const BUDGET_TRACE_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_TRACE
 const BUDGET_TIMELINE_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_TIMELINE || "1400", 10) || 1400);
 const BUDGET_FACTS_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_FACTS || "1400", 10) || 1400);
 const BUDGET_INVALIDATED_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_INVALIDATED || "1200", 10) || 1200);
+const BUDGET_HIERARCHY_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_HIERARCHY || "1400", 10) || 1400);
 const PROACTIVE_CONTEXT_QUERIES = Math.max(1, parseInt(process.env.FLEET_PROACTIVE_CONTEXT_QUERIES || "3", 10) || 3);
 
 // --- Output budget communicated to agent (CEP-inspired) ---
@@ -383,6 +384,10 @@ type TurnAssembly = {
     valid_to: string | null;
   }>;
   linkedArchival: Array<{ id?: number; relation: string; weight: number; reflection: string }>;
+  hierarchicalContexts: Array<{
+    seed: { id?: number; record_kind: string; record_id?: number | null; source_kind: string; content: string };
+    related: Array<{ tag: string; record_kind: string; record_id: number; depth: number; content: string }>;
+  }>;
   timelineEvents: Array<{
     id: number;
     relation: string;
@@ -507,6 +512,10 @@ type MemoryLookup = {
     valid_to: string | null;
   }>;
   linkedArchival?: Array<{ id?: number; relation: string; weight: number; reflection: string }>;
+  hierarchicalContexts?: Array<{
+    seed: { id?: number; record_kind: string; record_id?: number | null; source_kind: string; content: string };
+    related: Array<{ tag: string; record_kind: string; record_id: number; depth: number; content: string }>;
+  }>;
   timelineEvents?: Array<{
     id: number;
     relation: string;
@@ -1941,6 +1950,9 @@ async function assembleTurnContext(agentName: string, burst: IncomingBurst, wake
   const linkedArchival = preparedMemory?.linkedArchival?.length
     ? preparedMemory.linkedArchival
     : [];
+  const hierarchicalContexts = preparedMemory?.hierarchicalContexts?.length
+    ? preparedMemory.hierarchicalContexts
+    : [];
   const timelineEvents = timelinePreparedMemory(agentName, retrievalQuery);
   const retrievalTraces = preparedMemory?.traces?.length
     ? preparedMemory.traces
@@ -1962,6 +1974,7 @@ async function assembleTurnContext(agentName: string, burst: IncomingBurst, wake
     currentFacts,
     recentInvalidations,
     linkedArchival,
+    hierarchicalContexts,
     timelineEvents,
     retrievalTraces,
     workingLog,
@@ -2039,6 +2052,13 @@ function renderTurnPrompt(agentName: string, burst: IncomingBurst, turn: TurnAss
     }),
     BUDGET_TIMELINE_CHARS,
   );
+  const hierarchyLines = budgetSection(
+    turn.hierarchicalContexts.flatMap((cluster) => [
+      `- seed(${cluster.seed.record_kind}:${cluster.seed.record_id ?? cluster.seed.id ?? "?"}) ${cluster.seed.content}`,
+      ...cluster.related.map((row) => `  -> [${row.tag} d=${row.depth}] ${row.record_kind}:${row.record_id} ${row.content}`),
+    ]),
+    BUDGET_HIERARCHY_CHARS,
+  );
   const digestLines = budgetSection(
     turn.recentDigests.map((d) => `- ${d.summary}`),
     BUDGET_DIGEST_CHARS,
@@ -2076,6 +2096,8 @@ ${digestLines.length ? digestLines.join("\n") : "- (none)"}
 ${episodicLines.length ? episodicLines.join("\n") : "- (none)"}
 §TIMELINE
 ${timelineLines.length ? timelineLines.join("\n") : "- (none)"}
+§HIER
+${hierarchyLines.length ? hierarchyLines.join("\n") : "- (none)"}
 §TRACE
 ${traceLines.length ? traceLines.join("\n") : "- (none)"}
 §WM
