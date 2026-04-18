@@ -41,7 +41,7 @@ src/
   inference-local-small/ # small local model worker (light.sock)
   inference-cloud/      # shared provider socket server factory
   inference-local-rerank/ # BGE reranker worker (rerank.sock)
-  operator-console/     # human operator REPL
+  operator-console/     # human operator full-screen console
   state-artifacts/      # append-first JSONL writer
 state/                  # durable canonical records (gitignored)
   turns/                # <agent>.jsonl
