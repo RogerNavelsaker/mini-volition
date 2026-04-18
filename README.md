@@ -6,7 +6,7 @@ Local-first multi-agent runtime coordinating cloud LLM agents with SQLite-backed
 
 - **Runtime**: Bun (TypeScript)
 - **Build**: `bun run scripts/build.ts` compiles `src/` to standalone binaries in `bin/`
-- **Orchestration**: Fleet-managed background services with pidfiles/logs; optional Zellij layouts live in `config/fleet.kdl`
+- **Orchestration**: Fleet-managed background services with pidfiles/logs
 - **Data**: SQLite (hotpath acceleration) + JSONL/markdown (durable canonical state)
 - **Inference**: ONNX models over Unix sockets (embed, rerank, light, heavy)
 - **Providers**: Cloud APIs over Unix sockets (Claude, Gemini, OpenAI, OpenRouter)
@@ -16,7 +16,7 @@ Local-first multi-agent runtime coordinating cloud LLM agents with SQLite-backed
 ```
 bin/                    # compiled runtime binaries
 lib/                    # runtime shared libraries needed by compiled inference workers
-config/                 # fleet.kdl (optional zellij layout), fleet.json (agent roster)
+config/                 # fleet.json (agent roster)
 docs/                   # doctrine (architecture, protocols, schemas)
 prompts/                # system prompt sources (base + per-agent overlays)
 references/             # upstream behavior notes (read-only)

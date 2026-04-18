@@ -31,7 +31,7 @@
           "inference-cloud-openrouter"
         ];
         runtimeBinsWords = lib.concatStringsSep " " runtimeBins;
-        wrappedPath = lib.makeBinPath [ pkgs.bash pkgs.git pkgs.sqlite pkgs.zellij ];
+        wrappedPath = lib.makeBinPath [ pkgs.bash pkgs.git pkgs.sqlite ];
         wrappedLibraries = lib.makeLibraryPath [ pkgs.stdenv.cc.cc ];
         package = pkgs.stdenv.mkDerivation {
           pname = "mini-volition";
@@ -110,7 +110,7 @@ EOF
           mkdir -p "$out"
         '';
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [ bun sqlite zellij flox git ];
+          buildInputs = with pkgs; [ bun sqlite flox git ];
           shellHook = ''
             export META_REPO_ROOT=$(pwd)
             export PATH="$META_REPO_ROOT/bin:$PATH"
