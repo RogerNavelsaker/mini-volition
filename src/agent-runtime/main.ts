@@ -274,7 +274,8 @@ type QueueTaskAction = { type: "queue_task"; task: string; target_agent?: string
 type EscalateAction = { type: "escalate"; message: string; channel?: "private" | "urgent" };
 type ScratchpadAction = { type: "scratchpad"; op: "append" | "replace" | "clear"; content?: string };
 type SpawnScribeAction = { type: "spawn_scribe"; name: string; task: string };
-type Action = ReplyAction | NoopAction | NoteAction | SleepUntilAction | QueueTaskAction | EscalateAction | ScratchpadAction | SpawnScribeAction;
+type FocusAction = { type: "focus"; channels: string[]; duration_sec: number };
+type Action = ReplyAction | NoopAction | NoteAction | SleepUntilAction | QueueTaskAction | EscalateAction | ScratchpadAction | SpawnScribeAction | FocusAction;
 type TurnExecutionProfile = {
   profile: TurnProfile;
   model: string | null;
@@ -515,6 +516,15 @@ const ACTION_ENVELOPE_SCHEMA = {
               type: { const: "spawn_scribe" },
               name: { type: "string", minLength: 1 },
               task: { type: "string", minLength: 1 },
+            },
+          },
+          {
+            additionalProperties: false,
+            required: ["type", "channels", "duration_sec"],
+            properties: {
+              type: { const: "focus" },
+              channels: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+              duration_sec: { type: "number", minimum: 1 },
             },
           },
         ],
@@ -768,6 +778,15 @@ function validateAction(action: unknown): Action | null {
     const validNames = ["scribe", "milo", "homer", "roamer", "riker"];
     if (!validNames.includes(value.name.trim().toLowerCase())) return null;
     return { type: "spawn_scribe", name: value.name.trim().toLowerCase(), task: value.task.trim() };
+  }
+
+  if (value.type === "focus") {
+    if (!Array.isArray(value.channels) || value.channels.length === 0) return null;
+    const channels = value.channels.filter((c: unknown) => typeof c === "string" && (c as string).trim()).map((c: string) => c.trim());
+    if (channels.length === 0) return null;
+    const durationSec = typeof value.duration_sec === "number" ? Math.floor(value.duration_sec) : NaN;
+    if (!Number.isFinite(durationSec) || durationSec < 1) return null;
+    return { type: "focus", channels, duration_sec: durationSec };
   }
 
   return null;
@@ -2159,6 +2178,23 @@ async function processWakeEvent(
                 recordWorking("system", `Executed action: spawn_scribe ${(a as SpawnScribeAction).name} — inference failed or timed out`);
               }
               return `spawn_scribe:${(a as SpawnScribeAction).name}`;
+            } else if (a.type === "focus") {
+              const fa = a as FocusAction;
+              const resumeAt = new Date(Date.now() + fa.duration_sec * 1000).toISOString();
+              for (const channel of fa.channels) {
+                runStateInsert(
+                  `INSERT INTO fleet_channel_subscriptions (agent_name, channel, status, resume_at, note, created_at, updated_at)
+                   VALUES (?, ?, 'unsubscribed', ?, 'focus', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                   ON CONFLICT(agent_name, channel) DO UPDATE SET
+                     status = 'unsubscribed',
+                     resume_at = excluded.resume_at,
+                     note = 'focus',
+                     updated_at = CURRENT_TIMESTAMP`,
+                  name!, channel, resumeAt,
+                );
+              }
+              recordWorking("system", `Executed action: focus ${fa.channels.join(",")} for ${fa.duration_sec}s until ${resumeAt}`);
+              return `focus:${fa.channels.join(",")}`;
             } else {
               recordWorking("system", "Executed action: noop");
               return null;
@@ -2354,6 +2390,23 @@ async function runWorker() {
     recordWorking("system", `Recovered ${recoveredTurns.recovered} interrupted turn(s) older than stale TTL`);
   }
   
+  function resumeExpiredFocusWindows() {
+    const now = new Date().toISOString();
+    const expired = runStateQuery(
+      `SELECT channel FROM fleet_channel_subscriptions
+       WHERE agent_name = ? AND status = 'unsubscribed' AND note = 'focus' AND resume_at <= ?`,
+      name!, now,
+    ) as Array<{ channel: string }>;
+    for (const row of expired) {
+      runStateInsert(
+        `UPDATE fleet_channel_subscriptions SET status = 'subscribed', resume_at = NULL, note = NULL, updated_at = CURRENT_TIMESTAMP
+         WHERE agent_name = ? AND channel = ? AND status = 'unsubscribed' AND note = 'focus'`,
+        name!, row.channel,
+      );
+      recordWorking("system", `Auto-resumed focus window for channel ${row.channel}`);
+    }
+  }
+
   const dispatchResult = await runDispatchLoop(
     {
       selectWake: async () => {
@@ -2379,6 +2432,7 @@ async function runWorker() {
         return await selectNextWake();
       },
       processWake: async (wake) => {
+        resumeExpiredFocusWindows();
         await processWakeEvent(wake as Awaited<ReturnType<typeof selectNextWake>>);
       },
     },
