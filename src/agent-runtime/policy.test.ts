@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifySourceGroup, cooldownRange, randomizedCooldownMs, refractoryCooldownMs, retryConfig, turnProfileConfig, wakeClassFor } from "./policy";
+import { chooseRetrievalMode, classifySourceGroup, cooldownRange, randomizedCooldownMs, refractoryCooldownMs, retryConfig, turnProfileConfig, wakeClassFor } from "./policy";
 
 describe("turnProfileConfig", () => {
   test("uses global timeout as fallback for every profile", () => {
@@ -143,5 +143,16 @@ describe("wakeClassFor", () => {
   test("keeps public and ambient mail in the refractory class", () => {
     expect(wakeClassFor("mail_burst", "public")).toBe("refractory");
     expect(wakeClassFor("mail_burst", "unknown")).toBe("refractory");
+  });
+});
+
+describe("chooseRetrievalMode", () => {
+  test("selects raw mode when the wake explicitly asks for verbatim memory", () => {
+    const mode = chooseRetrievalMode("mail_burst", {
+      primary: { layer: "private" },
+      messages: [{ body: "Need raw verbatim memory rows with exact wording." }],
+    });
+
+    expect(mode).toBe("raw");
   });
 });

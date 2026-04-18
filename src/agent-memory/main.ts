@@ -1108,6 +1108,88 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
   const stale = !lastRefreshMs || (Date.now() - lastRefreshMs) > staleAfterSeconds * 1000;
 
   const activeRows = rows.filter((row) => row.status !== "deleted");
+  if (mode === "raw") {
+    const rawRanked = activeRows
+      .map((row) => ({
+        ...row,
+        lexical_score: overlapScore(query, row.content),
+        fused_score: 0,
+        top_bonus: 0,
+        link_boost: 0,
+        centrality_boost: 0,
+        lineage_boost: 0,
+        score: overlapScore(query, row.content) > 0 ? overlapScore(query, row.content) : 0.0001,
+      }))
+      .sort((left, right) => {
+        if ((right.lexical_score ?? 0) !== (left.lexical_score ?? 0)) return (right.lexical_score ?? 0) - (left.lexical_score ?? 0);
+        return right.id - left.id;
+      });
+    const budgetedSelection = selectBudgetedRows(rawRanked, lookupTokenBudget);
+    const budgetedRanked = budgetedSelection.rows;
+    const payload = JSON.stringify({
+      recentDigests: [],
+      episodic: [],
+      archival: [],
+      currentFacts: [],
+      recentInvalidations: [],
+      linkedArchival: [],
+      hierarchicalContexts: [],
+      rawResults: budgetedRanked.slice(0, Math.max(limit * 4, 12)).map((row) => ({
+        id: row.id,
+        record_kind: row.record_kind ?? "artifact",
+        record_id: row.record_id ?? null,
+        source_kind: row.source_kind,
+        content: row.content,
+      })),
+      traces: budgetedRanked.slice(0, Math.max(limit * 4, 12)).map((row) => ({
+        id: row.id,
+        record_kind: row.record_kind ?? "artifact",
+        record_id: row.record_id ?? null,
+        source_kind: row.source_kind,
+        score: Number((row.score ?? 0).toFixed(4)),
+        fused_score: 0,
+        top_bonus: 0,
+        lexical_score: Number((row.lexical_score ?? 0).toFixed(4)),
+        link_boost: 0,
+        centrality_boost: 0,
+        lineage_boost: 0,
+        strength: Number((row.strength ?? 1).toFixed(4)),
+        decay_score: Number((row.decay_score ?? 1).toFixed(4)),
+      })),
+      memorySelection: rows.length === 0
+        ? "memory artifacts unavailable"
+        : budgetedRanked.length === 0
+        ? "memory artifacts available; raw retrieval match empty"
+        : "memory artifacts available; raw direct retrieval",
+      retrievalMode: mode,
+      freshness: {
+        stale,
+        stale_after_seconds: staleAfterSeconds,
+        last_refresh_at: refreshState?.last_refresh_at ?? null,
+        last_status: refreshState?.last_status ?? null,
+        last_error: refreshState?.last_error ?? null,
+        artifact_count: refreshState?.artifact_count ?? rows.length,
+        source: refreshState?.source ?? null,
+      },
+      budget: {
+        token_budget: lookupTokenBudget,
+        tokens_used: budgetedSelection.tokensUsed,
+        dropped_results: budgetedSelection.dropped,
+      },
+      cache: {
+        hit: false,
+      },
+    });
+    writeLookupCache(
+      db,
+      agentName,
+      cacheKey,
+      payload,
+      resolveLookupExpiry(Date.now(), stale, refreshState?.last_refresh_at, staleAfterSeconds, lookupCacheTtlSeconds),
+    );
+    console.log(payload);
+    return;
+  }
   // Primary FTS pass on literal query
   const ftsRows = db.prepare(
     `SELECT rowid AS id, bm25(agent_memory_search_fts) AS score
@@ -2152,11 +2234,11 @@ if (cmd === "refresh") {
   await extractEntities(arg1);
 } else if (cmd === "lookup") {
   if (!arg1 || !arg2) {
-    console.error("Usage: agent-memory lookup <agent> <query> [limit] [mode]");
+    console.error("Usage: agent-memory lookup <agent> <query> [limit] [local|global|mix|raw]");
     process.exit(64);
   }
   const modeArg = Bun.argv[6];
-  const mode: RetrievalMode = modeArg === "local" || modeArg === "global" || modeArg === "mix" ? modeArg : "mix";
+  const mode: RetrievalMode = modeArg === "local" || modeArg === "global" || modeArg === "mix" || modeArg === "raw" ? modeArg : "mix";
   await lookup(arg1, arg2, Math.max(1, parseInt(Bun.argv[5] || "3", 10) || 3), mode);
 } else if (cmd === "invalidate") {
   if (!arg1 || !arg2) {

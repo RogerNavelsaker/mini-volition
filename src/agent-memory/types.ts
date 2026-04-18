@@ -107,7 +107,7 @@ export type DecomposeKeywordsResponse = {
 
 export type RerankResult = { index: number; text: string; score: number };
 
-export type RetrievalMode = "local" | "global" | "mix";
+export type RetrievalMode = "local" | "global" | "mix" | "raw";
 
 export type TimelineEvent = {
   id: number;

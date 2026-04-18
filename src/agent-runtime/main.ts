@@ -61,6 +61,7 @@ const BUDGET_TIMELINE_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_TI
 const BUDGET_FACTS_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_FACTS || "1400", 10) || 1400);
 const BUDGET_INVALIDATED_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_INVALIDATED || "1200", 10) || 1200);
 const BUDGET_HIERARCHY_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_HIERARCHY || "1400", 10) || 1400);
+const BUDGET_RAW_CHARS = Math.max(200, parseInt(process.env.FLEET_BUDGET_RAW || "1800", 10) || 1800);
 const PROACTIVE_CONTEXT_QUERIES = Math.max(1, parseInt(process.env.FLEET_PROACTIVE_CONTEXT_QUERIES || "3", 10) || 3);
 
 // --- Output budget communicated to agent (CEP-inspired) ---
@@ -388,6 +389,7 @@ type TurnAssembly = {
     seed: { id?: number; record_kind: string; record_id?: number | null; source_kind: string; content: string };
     related: Array<{ tag: string; record_kind: string; record_id: number; depth: number; content: string }>;
   }>;
+  rawResults: Array<{ id?: number; record_kind: string; record_id?: number | null; source_kind: string; content: string }>;
   timelineEvents: Array<{
     id: number;
     relation: string;
@@ -516,6 +518,7 @@ type MemoryLookup = {
     seed: { id?: number; record_kind: string; record_id?: number | null; source_kind: string; content: string };
     related: Array<{ tag: string; record_kind: string; record_id: number; depth: number; content: string }>;
   }>;
+  rawResults?: Array<{ id?: number; record_kind: string; record_id?: number | null; source_kind: string; content: string }>;
   timelineEvents?: Array<{
     id: number;
     relation: string;
@@ -535,6 +538,8 @@ type MemoryLookup = {
     top_bonus: number;
     lexical_score: number;
     link_boost: number;
+    centrality_boost: number;
+    lineage_boost: number;
     strength: number;
     decay_score: number;
   }>;
@@ -1177,7 +1182,7 @@ function requestInferenceRetrievalMode(source: WakeSource, burst: IncomingBurst)
       try {
         const parsed = JSON.parse(buffer.slice(0, newline).trim());
         const mode = parsed?.mode;
-        finish(mode === "local" || mode === "global" || mode === "mix" ? mode : null);
+        finish(mode === "local" || mode === "global" || mode === "mix" || mode === "raw" ? mode : null);
       } catch {
         finish(null);
       }
@@ -1203,6 +1208,7 @@ async function chooseRetrievalModeWithInference(source: WakeSource, burst: Incom
     { mode: "local", text: "urgent private exact bug fix error specific file trace local immediate task" },
     { mode: "global", text: "plan roadmap architecture overview summary broad project status design big picture global context" },
     { mode: "mix", text: "normal mixed turn with both immediate request and broader context memory" },
+    { mode: "raw", text: "raw verbatim literal exact wording full text unfiltered direct memory rows" },
   ];
   const [queryVector, ...prototypeVectors] = await Promise.all([
     requestInferenceEmbed(body),
@@ -1953,6 +1959,9 @@ async function assembleTurnContext(agentName: string, burst: IncomingBurst, wake
   const hierarchicalContexts = preparedMemory?.hierarchicalContexts?.length
     ? preparedMemory.hierarchicalContexts
     : [];
+  const rawResults = preparedMemory?.rawResults?.length
+    ? preparedMemory.rawResults
+    : [];
   const timelineEvents = timelinePreparedMemory(agentName, retrievalQuery);
   const retrievalTraces = preparedMemory?.traces?.length
     ? preparedMemory.traces
@@ -1975,6 +1984,7 @@ async function assembleTurnContext(agentName: string, burst: IncomingBurst, wake
     recentInvalidations,
     linkedArchival,
     hierarchicalContexts,
+    rawResults,
     timelineEvents,
     retrievalTraces,
     workingLog,
@@ -2059,6 +2069,10 @@ function renderTurnPrompt(agentName: string, burst: IncomingBurst, turn: TurnAss
     ]),
     BUDGET_HIERARCHY_CHARS,
   );
+  const rawLines = budgetSection(
+    turn.rawResults.map((row) => `- [${row.source_kind}/${row.record_kind}:${row.record_id ?? row.id ?? "?"}] ${row.content}`),
+    BUDGET_RAW_CHARS,
+  );
   const digestLines = budgetSection(
     turn.recentDigests.map((d) => `- ${d.summary}`),
     BUDGET_DIGEST_CHARS,
@@ -2075,8 +2089,10 @@ function renderTurnPrompt(agentName: string, burst: IncomingBurst, turn: TurnAss
       sc: row.score.toFixed(3),
       lx: row.lexical_score.toFixed(3),
       lk: row.link_boost.toFixed(3),
+      ct: row.centrality_boost.toFixed(3),
+      ln: row.lineage_boost.toFixed(3),
     })),
-    ["id", "rk", "sk", "sc", "lx", "lk"],
+    ["id", "rk", "sk", "sc", "lx", "lk", "ct", "ln"],
   );
   const traceLines = budgetSection(traceTable ? traceTable.split("\n") : [], BUDGET_TRACE_CHARS);
 
@@ -2098,6 +2114,8 @@ ${episodicLines.length ? episodicLines.join("\n") : "- (none)"}
 ${timelineLines.length ? timelineLines.join("\n") : "- (none)"}
 §HIER
 ${hierarchyLines.length ? hierarchyLines.join("\n") : "- (none)"}
+§RAW
+${rawLines.length ? rawLines.join("\n") : "- (none)"}
 §TRACE
 ${traceLines.length ? traceLines.join("\n") : "- (none)"}
 §WM

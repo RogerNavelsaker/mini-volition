@@ -31,6 +31,7 @@ export type TurnWakeSource = WakeSource;
 
 const GLOBAL_HINT = /\b(plan|roadmap|design|architecture|summarize|summary|overview|status|state of|big picture|broadly)\b/i;
 const LOCAL_HINT = /\b(fix|bug|error|trace|specific|exactly|where|which file|why did|urgent|private)\b/i;
+const RAW_HINT = /\b(raw|verbatim|literal|exact text|exact wording|full text|unfiltered|direct memory rows)\b/i;
 const LIGHT_HINT = /\b(status|overview|ack|noted|receipt|heartbeat|check-in|fyi)\b/i;
 const MAX_HINT = /\b(urgent|escalate|critical|broken|production|deadlock|stuck|outage|security)\b/i;
 
@@ -82,6 +83,7 @@ export function chooseRetrievalMode(source: RetrievalWakeSource, burst: Retrieva
   const primaryLayer = burst.primary.layer.toLowerCase();
   const body = burst.messages.map((entry) => entry.body.toLowerCase()).join("\n");
 
+  if (RAW_HINT.test(body)) return "raw";
   if (source === "internal_job" || source === "alarm" || source === "local_event") {
     if (GLOBAL_HINT.test(body)) return "global";
     return "local";
