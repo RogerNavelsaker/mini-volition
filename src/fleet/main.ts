@@ -13,6 +13,7 @@ import {
 } from "fs";
 import { resolve, join, dirname } from "path";
 import { appendFleetArtifact } from "../state-artifacts/lib";
+import { loadFleetConfig, saveFleetConfig, addAgentToConfig, removeAgentFromConfig, patchKdl } from "./kdl-patch";
 
 // When compiled, import.meta.dir points into /$bunfs. When running from source, use the real repository root.
 const fleetRoot = process.env.META_REPO_ROOT
@@ -29,6 +30,7 @@ const stateDir = resolve(process.env.FLEET_STATE_DIR || join(fleetRoot, "state")
 
 const sessionName = process.env.FLEET_SESSION_NAME || "fleet";
 const layoutPath = join(configDir, "fleet.kdl");
+const fleetConfigPath = process.env.FLEET_CONFIG || join(configDir, "fleet.json");
 
 interface AgentConfig {
   name: string;
@@ -186,7 +188,7 @@ function generateKdl(): string {
 }
 
 function usage(): never {
-  console.error("Usage: bin/fleet <genesis|start|attach|detach|stop|terminus|up|down|restart|status|governor-status|governor-bump|governor-force|rebuild-governor|verify-governor>");
+  console.error("Usage: bin/fleet <genesis|start|attach|detach|stop|terminus|up|down|restart|status|governor-status|governor-bump|governor-force|rebuild-governor|verify-governor|patch-kdl|add-agent|remove-agent>");
   process.exit(64);
 }
 
@@ -849,6 +851,37 @@ switch (process.argv[2]) {
   case "list-events":
     console.log(JSON.stringify(listEvents(process.argv[3] ?? null, Math.max(1, parseInt(process.argv[4] || "20", 10) || 20))));
     break;
+  case "patch-kdl": {
+    patchKdl(fleetConfigPath, layoutPath, runtimeDir, DEFAULT_AGENTS);
+    console.log(`patched ${layoutPath}`);
+    break;
+  }
+  case "add-agent": {
+    const [, , , addName, addModel, addSocket] = process.argv;
+    if (!addName || !addModel || !addSocket) {
+      console.error("Usage: fleet add-agent <name> <model> <socket>");
+      process.exit(64);
+    }
+    const cfg = loadFleetConfig(fleetConfigPath, DEFAULT_AGENTS);
+    const updated = addAgentToConfig(cfg, { name: addName, model: addModel, socket: addSocket });
+    saveFleetConfig(fleetConfigPath, updated);
+    patchKdl(fleetConfigPath, layoutPath, runtimeDir, DEFAULT_AGENTS);
+    console.log(JSON.stringify({ added: addName, agents: updated.agents.map((a) => a.name) }));
+    break;
+  }
+  case "remove-agent": {
+    const removeName = process.argv[3];
+    if (!removeName) {
+      console.error("Usage: fleet remove-agent <name>");
+      process.exit(64);
+    }
+    const cfg = loadFleetConfig(fleetConfigPath, DEFAULT_AGENTS);
+    const updated = removeAgentFromConfig(cfg, removeName);
+    saveFleetConfig(fleetConfigPath, updated);
+    patchKdl(fleetConfigPath, layoutPath, runtimeDir, DEFAULT_AGENTS);
+    console.log(JSON.stringify({ removed: removeName, agents: updated.agents.map((a) => a.name) }));
+    break;
+  }
   default:
     usage();
 }
