@@ -394,6 +394,7 @@ function withDb<T>(fn: (db: Database) => T): T {
     turn_count INTEGER DEFAULT 0,
     forced_cooldown_until DATETIME,
     last_reason TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
   db.run(`CREATE TABLE IF NOT EXISTS fleet_event_log (
@@ -526,6 +527,51 @@ function governorBump(agent: string, windowSec: number, turnLimit: number, reaso
     });
 
     return governorStatus(agent, windowSec, turnLimit);
+  });
+}
+
+function governorRecordFailure(agent: string, threshold: number, cooldownSec: number, reason: string | null) {
+  return withDb((db) => {
+    const rec = currentGovernor(db, agent);
+    const nextCount = (rec?.consecutive_failures ?? 0) + 1;
+    const shouldCooldown = nextCount >= threshold;
+    const cooldownUntil = shouldCooldown ? isoAfterSeconds(cooldownSec) : (rec?.forced_cooldown_until ?? null);
+    db.run(
+      `INSERT INTO fleet_governor (agent_name, window_started_at, turn_count, forced_cooldown_until, last_reason, consecutive_failures, updated_at)
+       VALUES (?, COALESCE(?, CURRENT_TIMESTAMP), 0, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(agent_name) DO UPDATE SET
+         consecutive_failures = excluded.consecutive_failures,
+         forced_cooldown_until = excluded.forced_cooldown_until,
+         last_reason = excluded.last_reason,
+         updated_at = CURRENT_TIMESTAMP`,
+      [agent, rec?.window_started_at ?? null, cooldownUntil, reason, nextCount],
+    );
+    appendFleetArtifact("governor", {
+      record_type: "governor",
+      event: "failure_recorded",
+      agent_name: agent,
+      consecutive_failures: nextCount,
+      threshold,
+      cooled_down: shouldCooldown,
+      cooldown_until: cooldownUntil,
+      reason,
+    });
+    return { agent_name: agent, consecutive_failures: nextCount, cooled_down: shouldCooldown, cooldown_until: cooldownUntil };
+  });
+}
+
+function governorResetFailures(agent: string) {
+  return withDb((db) => {
+    db.run(
+      `INSERT INTO fleet_governor (agent_name, window_started_at, turn_count, forced_cooldown_until, last_reason, consecutive_failures, updated_at)
+       VALUES (?, CURRENT_TIMESTAMP, 0, NULL, NULL, 0, CURRENT_TIMESTAMP)
+       ON CONFLICT(agent_name) DO UPDATE SET
+         consecutive_failures = 0,
+         forced_cooldown_until = NULL,
+         updated_at = CURRENT_TIMESTAMP`,
+      [agent],
+    );
+    return { agent_name: agent, consecutive_failures: 0 };
   });
 }
 
@@ -677,6 +723,12 @@ switch (process.argv[2]) {
     break;
   case "governor-force":
     console.log(JSON.stringify(governorForce(process.argv[3] || "", Math.max(1, parseInt(process.argv[4] || "60", 10) || 60), process.argv[5] ?? null)));
+    break;
+  case "governor-record-failure":
+    console.log(JSON.stringify(governorRecordFailure(process.argv[3] || "", Math.max(1, parseInt(process.argv[4] || "3", 10) || 3), Math.max(1, parseInt(process.argv[5] || "300", 10) || 300), process.argv[6] ?? null)));
+    break;
+  case "governor-reset-failures":
+    console.log(JSON.stringify(governorResetFailures(process.argv[3] || "")));
     break;
   case "rebuild-governor":
     await rebuildGovernor();
