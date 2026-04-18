@@ -274,3 +274,63 @@ export function reclaimStaleClaims(db: Database, agent: string, ttlMs: number) {
   }
   return reclaimed;
 }
+
+export type ReassignResult = {
+  reassigned: number[];
+  skipped: number;
+};
+
+export function reassignAgentJobs(
+  db: Database,
+  fromAgent: string,
+  toAgent: string,
+  options: { includeClaimed?: boolean } = {},
+): ReassignResult {
+  const statusFilter = options.includeClaimed
+    ? `status IN ('queued', 'claimed')`
+    : `status = 'queued'`;
+
+  const jobs = db.prepare(
+    `SELECT id, status FROM fleet_internal_jobs
+     WHERE target_agent = ? AND ${statusFilter}
+     ORDER BY id ASC`,
+  ).all(fromAgent) as Array<{ id: number; status: string }>;
+
+  const reassigned: number[] = [];
+  let skipped = 0;
+
+  for (const job of jobs) {
+    if (job.status === "claimed") {
+      db.run(
+        `UPDATE fleet_internal_jobs
+         SET target_agent = ?,
+             status = 'queued',
+             claimed_at = NULL,
+             claimed_by = NULL,
+             last_error = 'reassigned from ' || target_agent,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND target_agent = ? AND status = 'claimed'`,
+        [toAgent, job.id, fromAgent],
+      );
+    } else {
+      db.run(
+        `UPDATE fleet_internal_jobs
+         SET target_agent = ?,
+             last_error = 'reassigned from ' || target_agent,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND target_agent = ? AND status = 'queued'`,
+        [toAgent, job.id, fromAgent],
+      );
+    }
+    const updated = db.prepare(
+      `SELECT id FROM fleet_internal_jobs WHERE id = ? AND target_agent = ?`,
+    ).get(job.id, toAgent);
+    if (updated) {
+      reassigned.push(job.id);
+    } else {
+      skipped += 1;
+    }
+  }
+
+  return { reassigned, skipped };
+}

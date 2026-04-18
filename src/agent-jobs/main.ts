@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { addJobDependency, autoRetryOrFail, cascadeCancel, ensureJobSchema, executionGraph, jobDeps, manualUnblock, nextQueuedJob, normalizePriority, pendingBlockers, PRIORITIES, reclaimStaleClaims, unblockDependents } from "./core";
+import { addJobDependency, autoRetryOrFail, cascadeCancel, ensureJobSchema, executionGraph, jobDeps, manualUnblock, nextQueuedJob, normalizePriority, pendingBlockers, PRIORITIES, reclaimStaleClaims, reassignAgentJobs, unblockDependents } from "./core";
 import { appendJobArtifact } from "../state-artifacts/lib";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
@@ -31,7 +31,7 @@ const [, , cmd, arg1, arg2, arg3, arg4] = Bun.argv;
 const arg5 = Bun.argv[6];
 
 function usage(): never {
-  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|depend|cascade-cancel|unblock-job|deps|graph|reclaim-stale|rebuild|verify|list|skill> ...");
+  console.error("Usage: agent-jobs <queue|peek|claim|complete|fail|reschedule|wait|block|cancel|resume|depend|cascade-cancel|unblock-job|deps|graph|reclaim-stale|reassign|rebuild|verify|list|skill> ...");
   process.exit(64);
 }
 
@@ -506,6 +506,23 @@ if (cmd === "queue") {
     });
   }
   console.log(JSON.stringify({ agent: arg1, ttl_ms: ttlMs, reclaimed_ids: reclaimed }));
+} else if (cmd === "reassign") {
+  if (!arg1 || !arg2) {
+    console.error("Usage: agent-jobs reassign <fromAgent> <toAgent> [--include-claimed]");
+    process.exit(64);
+  }
+  const includeClaimed = process.argv.includes("--include-claimed");
+  const result = reassignAgentJobs(db, arg1, arg2, { includeClaimed });
+  appendJobArtifact(arg1, {
+    record_type: "job_reassignment",
+    event: "reassign",
+    from_agent: arg1,
+    to_agent: arg2,
+    include_claimed: includeClaimed,
+    reassigned_ids: result.reassigned,
+    skipped: result.skipped,
+  });
+  console.log(JSON.stringify({ from_agent: arg1, to_agent: arg2, reassigned: result.reassigned, skipped: result.skipped }));
 } else if (cmd === "rebuild") {
   rebuildJobs(arg1);
 } else if (cmd === "verify") {
