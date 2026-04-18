@@ -6,7 +6,7 @@ Local-first multi-agent runtime coordinating cloud LLM agents with SQLite-backed
 
 - **Runtime**: Bun (TypeScript)
 - **Build**: `bun run scripts/build.ts` compiles `src/` to standalone binaries in `bin/`
-- **Orchestration**: Zellij multiplexer sessions via `config/fleet.kdl`
+- **Orchestration**: Fleet-managed background services with pidfiles/logs; optional Zellij layouts live in `config/fleet.kdl`
 - **Data**: SQLite (hotpath acceleration) + JSONL/markdown (durable canonical state)
 - **Inference**: ONNX models over Unix sockets (embed, rerank, light, heavy)
 - **Providers**: Cloud APIs over Unix sockets (Claude, Gemini, OpenAI, OpenRouter)
@@ -16,7 +16,7 @@ Local-first multi-agent runtime coordinating cloud LLM agents with SQLite-backed
 ```
 bin/                    # compiled runtime binaries
 lib/                    # runtime shared libraries needed by compiled inference workers
-config/                 # fleet.kdl (zellij layout), fleet.json (agent roster)
+config/                 # fleet.kdl (optional zellij layout), fleet.json (agent roster)
 docs/                   # doctrine (architecture, protocols, schemas)
 prompts/                # system prompt sources (base + per-agent overlays)
 references/             # upstream behavior notes (read-only)
@@ -61,11 +61,13 @@ bun install --frozen-lockfile     # install exact deps from bun.lock
 bun run scripts/build.ts          # compile all runtime binaries to bin/
 
 # session management
-fleet genesis                      # start zellij session with all panes
-fleet terminus                     # stop session and clean sockets
-fleet attach                       # attach to running session
-fleet detach                       # detach from session
-fleet restart                      # terminus + genesis
+fleet genesis                      # initialize runtime/state/service directories
+fleet start                        # launch detached fleet services
+fleet attach                       # open operator-console against the running fleet
+fleet detach                       # no-op without a multiplexer
+fleet stop                         # stop detached fleet services
+fleet terminus                     # stop services and clean sockets
+fleet restart                      # stop + start
 
 # operations
 fleet status                       # show binary/db/socket readiness

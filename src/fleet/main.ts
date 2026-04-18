@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
-import { spawnSync, spawn } from "bun";
+import { spawnSync } from "bun";
+import { spawn as nodeSpawn } from "child_process";
 import {
   mkdirSync,
   unlinkSync,
@@ -10,6 +11,8 @@ import {
   rmSync,
   readFileSync,
   existsSync,
+  openSync,
+  closeSync,
 } from "fs";
 import { resolve, join, dirname } from "path";
 import { createConnection } from "net";
@@ -29,7 +32,6 @@ const runtimeDir = resolve(process.env.FLEET_RUNTIME_DIR || join(fleetRoot, "run
 const stateDir = resolve(process.env.FLEET_STATE_DIR || join(fleetRoot, "state"));
 
 const sessionName = process.env.FLEET_SESSION_NAME || "fleet";
-const layoutPath = join(configDir, "fleet.kdl");
 
 interface AgentConfig {
   name: string;
@@ -94,6 +96,12 @@ const embedBin = join(binDir, "inference-local-embed");
 const rerankBin = join(binDir, "inference-local-rerank");
 const lightBin = join(binDir, "inference-local-small");
 const heavyBin = join(binDir, "inference-local-medium");
+
+type ServiceDefinition = {
+  name: string;
+  bin: string;
+  env: Record<string, string>;
+};
 
 function generateKdl(): string {
   const config = loadConfig();
@@ -191,6 +199,86 @@ function generateKdl(): string {
 `;
 }
 
+function providerModels() {
+  const config = loadConfig();
+  const providerMap = new Map(config.agents.map((agent) => [agent.name, agent.model]));
+  return {
+    config,
+    anthropicModel: process.env.INFERENCE_CLOUD_ANTHROPIC_MODEL || providerMap.get("claude") || "",
+    googleModel: process.env.INFERENCE_CLOUD_GOOGLE_MODEL || providerMap.get("gemini") || "",
+    openaiModel: process.env.INFERENCE_CLOUD_OPENAI_MODEL || providerMap.get("codex") || "",
+    openrouterModel: process.env.INFERENCE_CLOUD_OPENROUTER_MODEL || "",
+  };
+}
+
+function serviceBaseEnv() {
+  const onnxLibDir = join(fleetRoot, "lib", "onnxruntime", "linux", "x64");
+  const ldLibraryPath = process.env.LD_LIBRARY_PATH
+    ? `${onnxLibDir}:${process.env.LD_LIBRARY_PATH}`
+    : onnxLibDir;
+  return {
+    AGENT_MAIL_DB: resolve(mailDb),
+    AGENT_JOBS_DB: resolve(jobsDb),
+    AGENT_MEMORY_DB: resolve(memoryDb),
+    AGENT_STATE_DB: resolve(stateDb),
+    FLEET_LIBRARIAN_DB: resolve(librarianDb),
+    INFERENCE_LOCAL_EMBED_SOCKET: resolve(embedSocket),
+    INFERENCE_LOCAL_RERANK_SOCKET: resolve(rerankSocket),
+    INFERENCE_LOCAL_SMALL_SOCKET: resolve(lightSocket),
+    INFERENCE_LOCAL_MEDIUM_SOCKET: resolve(heavySocket),
+    INFERENCE_CLOUD_ANTHROPIC_SOCKET: resolve(runtimeDir, "claude.sock"),
+    INFERENCE_CLOUD_GOOGLE_SOCKET: resolve(runtimeDir, "gemini.sock"),
+    INFERENCE_CLOUD_OPENAI_SOCKET: resolve(runtimeDir, "openai.sock"),
+    INFERENCE_CLOUD_OPENROUTER_SOCKET: resolve(runtimeDir, "openrouter.sock"),
+    LD_LIBRARY_PATH: ldLibraryPath,
+    META_REPO_ROOT: fleetRoot,
+  };
+}
+
+function operatorConsoleEnv() {
+  return {
+    ...process.env,
+    AGENT_MAIL_DB: resolve(mailDb),
+    AGENT_JOBS_DB: resolve(jobsDb),
+    AGENT_MEMORY_DB: resolve(memoryDb),
+    AGENT_STATE_DB: resolve(stateDb),
+    META_REPO_ROOT: fleetRoot,
+  };
+}
+
+function serviceDefinitions(): ServiceDefinition[] {
+  const base = serviceBaseEnv();
+  const { config, anthropicModel, googleModel, openaiModel, openrouterModel } = providerModels();
+  return [
+    { name: "inference-cloud-anthropic", bin: join(binDir, "inference-cloud-anthropic"), env: { ...base } },
+    { name: "inference-cloud-google", bin: join(binDir, "inference-cloud-google"), env: { ...base } },
+    { name: "inference-cloud-openai", bin: join(binDir, "inference-cloud-openai"), env: { ...base } },
+    { name: "inference-cloud-openrouter", bin: join(binDir, "inference-cloud-openrouter"), env: { ...base } },
+    { name: "inference-local-embed", bin: embedBin, env: { ...base } },
+    { name: "inference-local-rerank", bin: rerankBin, env: { ...base } },
+    { name: "inference-local-small", bin: lightBin, env: { ...base } },
+    { name: "inference-local-medium", bin: heavyBin, env: { ...base } },
+    ...config.agents.map((agent): ServiceDefinition => ({
+      name: `agent-${agent.name}`,
+      bin: harnessBin,
+      env: {
+        ...base,
+        AGENT_NAME: agent.name,
+        AGENT_PROMPT_MODE: "provider",
+        INFERENCE_CLOUD_SOCKET: resolve(runtimeDir, agent.socket),
+        INFERENCE_CLOUD_MODEL: agent.model,
+        INFERENCE_CLOUD_ANTHROPIC_MODEL: anthropicModel,
+        INFERENCE_CLOUD_GOOGLE_MODEL: googleModel,
+        INFERENCE_CLOUD_OPENAI_MODEL: openaiModel,
+        INFERENCE_CLOUD_OPENROUTER_MODEL: openrouterModel,
+        AGENT_MAIL_BIN: "agent-mail",
+      },
+    })),
+    { name: "fleet-reporter", bin: digestBin, env: { ...base } },
+    { name: "fleet-librarian", bin: librarianBin, env: { ...base } },
+  ];
+}
+
 function usage(): never {
   console.error("Usage: bin/fleet <genesis|start|attach|detach|stop|terminus|up|down|restart|status|heartbeat-check|governor-status|governor-bump|governor-force|rebuild-governor|verify-governor>");
   process.exit(64);
@@ -202,9 +290,7 @@ function genesisSession() {
   ensureConfigDir();
   ensureRuntimeDir();
   ensureStateDir();
-  
-  requireCmd("bun");
-  requireCmd("zellij");
+  ensureServiceDirs();
 
   if (!verifyAgentBins()) {
     console.error("Genesis failed: Missing agent binaries.");
@@ -402,19 +488,57 @@ function requestSocketHeartbeat(socketPath: string, timeoutMs = 750): Promise<So
   });
 }
 
-function sessionLine(): string {
-  const result = spawnSync(["zellij", "list-sessions"]);
-  const output = result.stdout.toString().replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
-  return output.split("\n").find((line) => line.startsWith(sessionName)) || "";
+function serviceDir(...parts: string[]) {
+  return join(runtimeDir, "services", ...parts);
+}
+
+function ensureServiceDirs() {
+  mkdirSync(serviceDir("pids"), { recursive: true });
+  mkdirSync(serviceDir("logs"), { recursive: true });
+}
+
+function pidPath(name: string) {
+  return serviceDir("pids", `${name}.pid`);
+}
+
+function logPath(name: string) {
+  return serviceDir("logs", `${name}.log`);
+}
+
+function readPid(name: string): number | null {
+  const file = pidPath(name);
+  if (!existsSync(file)) return null;
+  const value = Number.parseInt(readFileSync(file, "utf-8").trim(), 10);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function pidAlive(pid: number | null): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function serviceState(service: ServiceDefinition) {
+  const pid = readPid(service.name);
+  const running = pidAlive(pid);
+  if (!running && existsSync(pidPath(service.name))) {
+    try {
+      unlinkSync(pidPath(service.name));
+    } catch {}
+  }
+  return { pid, running };
 }
 
 function sessionExists(): boolean {
-  return sessionLine().length > 0;
+  return serviceDefinitions().some((service) => readPid(service.name) !== null || existsSync(pidPath(service.name)));
 }
 
 function sessionRunning(): boolean {
-  const line = sessionLine();
-  return line.length > 0 && !line.includes("(EXITED - attach to resurrect)");
+  return serviceDefinitions().some((service) => serviceState(service).running);
 }
 
 function ensureBinDir() {
@@ -674,48 +798,34 @@ function governorBump(agent: string, windowSec: number, turnLimit: number, reaso
 }
 
 function startSession() {
-  requireCmd("zellij");
-
-  if (sessionRunning()) {
-    console.log(`fleet session '${sessionName}' is already running`);
-    return;
-  }
-
-  if (sessionExists()) {
-    spawnSync(["zellij", "delete-session", sessionName]);
-  }
-
-  const kdl = generateKdl();
-  const tmpLayout = join(runtimeDir, "fleet-dynamic.kdl");
   ensureRuntimeDir();
-  writeFileSync(tmpLayout, kdl);
-
-  const child = spawn(
-    ["zellij", "--new-session-with-layout", tmpLayout, "--session", sessionName],
-    { cwd: fleetRoot, stdout: "ignore", stderr: "ignore", stdin: "ignore" },
-  );
-  child.unref();
-
-  for (let i = 0; i < 10; i++) {
-    Bun.sleepSync(200);
-    if (sessionRunning()) {
-      spawnSync(["zellij", "action", "--session", sessionName, "switch-mode", "locked"]);
-      console.log(`fleet session '${sessionName}' started`);
-      return;
-    }
+  ensureServiceDirs();
+  const services = serviceDefinitions();
+  const started: string[] = [];
+  for (const service of services) {
+    if (serviceState(service).running) continue;
+    const stdoutFd = openSync(logPath(service.name), "a");
+    const stderrFd = openSync(logPath(service.name), "a");
+    const child = nodeSpawn(service.bin, [], {
+      cwd: fleetRoot,
+      env: { ...process.env, ...service.env },
+      stdio: ["ignore", stdoutFd, stderrFd],
+      detached: true,
+    });
+    closeSync(stdoutFd);
+    closeSync(stderrFd);
+    child.unref();
+    writeFileSync(pidPath(service.name), `${child.pid}\n`);
+    started.push(service.name);
   }
-
-  console.error(`failed to start fleet session '${sessionName}'`);
-  process.exit(1);
+  const running = services.filter((service) => serviceState(service).running).length;
+  console.log(`fleet services running ${running}/${services.length}${started.length ? ` started=${started.join(",")}` : ""}`);
 }
 
 function attachSession() {
-  requireCmd("zellij");
-  if (!sessionRunning()) {
-    console.error(`fleet session '${sessionName}' is not running`);
-    process.exit(1);
-  }
-  const result = spawnSync(["zellij", "attach", sessionName], {
+  const result = spawnSync([operatorBin], {
+    cwd: fleetRoot,
+    env: operatorConsoleEnv(),
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",
@@ -724,36 +834,57 @@ function attachSession() {
 }
 
 function detachSession() {
-  requireCmd("zellij");
-  if (!sessionRunning()) {
-    console.log(`fleet session '${sessionName}' is not running`);
-    return;
-  }
-  spawnSync(["zellij", "action", "--session", sessionName, "detach"]);
-  console.log(`fleet session '${sessionName}' detached`);
+  console.log("fleet detach is a no-op without a multiplexer; use operator-console directly");
 }
 
 function stopSession() {
-  requireCmd("zellij");
-  if (!sessionExists()) {
-    console.log(`fleet session '${sessionName}' is not running`);
-    return;
+  const services = serviceDefinitions();
+  const stopped: string[] = [];
+  for (const service of services) {
+    const pid = readPid(service.name);
+    if (!pidAlive(pid)) {
+      if (existsSync(pidPath(service.name))) {
+        try {
+          unlinkSync(pidPath(service.name));
+        } catch {}
+      }
+      continue;
+    }
+    try {
+      process.kill(pid!, "SIGTERM");
+      stopped.push(service.name);
+    } catch {}
   }
-  spawnSync(["zellij", "kill-session", sessionName]);
-  spawnSync(["zellij", "delete-session", sessionName]);
-  console.log(`fleet session '${sessionName}' stopped`);
+  Bun.sleepSync(300);
+  for (const service of services) {
+    const pid = readPid(service.name);
+    if (!pidAlive(pid)) {
+      if (existsSync(pidPath(service.name))) {
+        try {
+          unlinkSync(pidPath(service.name));
+        } catch {}
+      }
+      continue;
+    }
+    try {
+      process.kill(pid!, "SIGKILL");
+    } catch {}
+    if (existsSync(pidPath(service.name))) {
+      try {
+        unlinkSync(pidPath(service.name));
+      } catch {}
+    }
+  }
+  console.log(`fleet services stopped${stopped.length ? ` ${stopped.join(",")}` : ""}`);
 }
 
 async function showStatus() {
   ensureRuntimeDir();
   ensureStateDir();
-  if (sessionRunning()) {
-    console.log(`session: running (${sessionName})`);
-  } else if (sessionExists()) {
-    console.log(`session: exited (${sessionName})`);
-  } else {
-    console.log(`session: stopped (${sessionName})`);
-  }
+  ensureServiceDirs();
+  const services = serviceDefinitions();
+  const runningServices = services.filter((service) => serviceState(service).running);
+  console.log(`fleet: ${runningServices.length > 0 ? "running" : sessionExists() ? "partial" : "stopped"} (${runningServices.length}/${services.length} services)`);
 
   console.log(`agent-mail-bin: ${isExecutable(mailBin) ? "ready" : "missing"} ${mailBin}`);
   console.log(`agent-runtime-bin: ${isExecutable(harnessBin) ? "ready" : "missing"} ${harnessBin}`);
@@ -793,6 +924,10 @@ async function showStatus() {
     } else {
       console.log(`${entry.name}: unavailable ${entry.path}`);
     }
+  }
+  for (const service of services) {
+    const state = serviceState(service);
+    console.log(`service-${service.name}: ${state.running ? `running pid=${state.pid}` : "stopped"} log=${logPath(service.name)}`);
   }
   console.log(`state-dir: ${stateDir}`);
 }
