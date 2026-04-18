@@ -16,6 +16,19 @@ export type LineageTagRow = {
   updated_at?: string;
 };
 
+export type ProximityCandidate = {
+  searchId: number;
+  recordKind: string;
+  recordId: number | null;
+};
+
+export type ProximityTagRow = {
+  record_kind: LineageRecordKind;
+  record_id: number;
+  tag: string;
+  depth: number;
+};
+
 export function listLineageTags(
   db: Database,
   agentName: string,
@@ -100,4 +113,40 @@ export function inheritLineageTags(
       ),
     )
     .filter(Boolean) as LineageTagRow[];
+}
+
+function lineageTagWeight(tag: string): number {
+  if (tag.startsWith("compaction:")) return 0.18;
+  if (tag.startsWith("kind:")) return 0.04;
+  return 0.08;
+}
+
+export function computeLineageBoosts(
+  candidates: ProximityCandidate[],
+  seededSearchIds: number[],
+  tagRows: ProximityTagRow[],
+): Map<number, number> {
+  const candidateByRecord = new Map<string, ProximityCandidate>();
+  for (const candidate of candidates) {
+    if ((candidate.recordKind !== "compaction_item" && candidate.recordKind !== "fact") || candidate.recordId == null) continue;
+    candidateByRecord.set(`${candidate.recordKind}:${candidate.recordId}`, candidate);
+  }
+
+  const seededSet = new Set(seededSearchIds);
+  const seededTags = new Set<string>();
+  for (const row of tagRows) {
+    const candidate = candidateByRecord.get(`${row.record_kind}:${row.record_id}`);
+    if (candidate && seededSet.has(candidate.searchId)) seededTags.add(row.tag);
+  }
+
+  const boosts = new Map<number, number>();
+  for (const row of tagRows) {
+    if (!seededTags.has(row.tag)) continue;
+    const candidate = candidateByRecord.get(`${row.record_kind}:${row.record_id}`);
+    if (!candidate || seededSet.has(candidate.searchId)) continue;
+    const current = boosts.get(candidate.searchId) ?? 0;
+    const next = current + lineageTagWeight(row.tag) / Math.max(1, row.depth + 1);
+    boosts.set(candidate.searchId, Math.min(0.24, next));
+  }
+  return boosts;
 }

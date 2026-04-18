@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { inheritLineageTags, listLineageTags, seedCompactionItemLineage, upsertLineageTag } from "./lineage";
+import { computeLineageBoosts, inheritLineageTags, listLineageTags, seedCompactionItemLineage, upsertLineageTag } from "./lineage";
 import { ensureSchema } from "./schema";
 
 describe("memory lineage tags", () => {
@@ -39,5 +39,26 @@ describe("memory lineage tags", () => {
     const rows = listLineageTags(db, "codex", "fact", 44);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.depth).toBe(1);
+  });
+
+  test("boosts nearby records that share lineage with seeded matches", () => {
+    const boosts = computeLineageBoosts(
+      [
+        { searchId: 1, recordKind: "compaction_item", recordId: 11 },
+        { searchId: 2, recordKind: "fact", recordId: 44 },
+        { searchId: 3, recordKind: "fact", recordId: 45 },
+      ],
+      [1],
+      [
+        { record_kind: "compaction_item", record_id: 11, tag: "compaction:4", depth: 0 },
+        { record_kind: "fact", record_id: 44, tag: "compaction:4", depth: 1 },
+        { record_kind: "fact", record_id: 44, tag: "kind:fact", depth: 1 },
+        { record_kind: "fact", record_id: 45, tag: "kind:fact", depth: 1 },
+      ],
+    );
+
+    expect(boosts.get(1)).toBeUndefined();
+    expect(boosts.get(2)).toBeCloseTo(0.09, 5);
+    expect(boosts.get(3)).toBeUndefined();
   });
 });

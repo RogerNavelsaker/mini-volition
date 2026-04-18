@@ -6,7 +6,7 @@ import { buildLookupCacheKey, invalidateLookupCache, readLookupCache, resolveLoo
 import { computeNodeCentrality } from "./centrality";
 import { selectCompactionCandidates } from "./compaction";
 import { relationForItemKinds, upsertMemoryLink, invalidateMemoryLinks, timelineQueryTokens } from "./links";
-import { inheritLineageTags, listLineageTags, seedCompactionItemLineage } from "./lineage";
+import { computeLineageBoosts, inheritLineageTags, listLineageTags, seedCompactionItemLineage } from "./lineage";
 import { consolidateExtractedFacts, deriveFacts, invalidateMemoryFacts, upsertMemoryFact } from "./facts";
 import { getRetentionPolicy, isImportanceLevel, isMemoryKind, listRetentionPolicies, upsertRetentionPolicy } from "./retention";
 import { selectBudgetedRows } from "./retrieval";
@@ -1088,7 +1088,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
     return;
   }
   const rows = db.prepare(
-    `SELECT si.id, si.record_kind, si.agent_name, si.source_kind, si.content, si.embedding_json,
+    `SELECT si.id, si.record_kind, si.record_id, si.agent_name, si.source_kind, si.content, si.embedding_json,
             COALESCE(a.importance, 'high') AS importance,
             COALESCE(a.strength, ci.strength, 1.0) AS strength,
             COALESCE(a.recall_count, ci.recall_count, 0) AS recall_count,
@@ -1225,6 +1225,22 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
       fused.set(row.from_search_id, current);
     }
   }
+  const lineageTagRows = db.prepare(
+    `SELECT record_kind, record_id, tag, depth
+     FROM agent_memory_lineage_tags
+     WHERE agent_name = ?
+       AND record_kind IN ('compaction_item', 'fact')`,
+  ).all(agentName) as Array<{ record_kind: "compaction_item" | "fact"; record_id: number; tag: string; depth: number }>;
+  const lineageSeedIds = [...fused.keys()].slice(0, 24);
+  const lineageBoosts = computeLineageBoosts(
+    activeRows.map((row) => ({
+      searchId: row.id,
+      recordKind: row.record_kind ?? "artifact",
+      recordId: row.record_id ?? null,
+    })),
+    lineageSeedIds,
+    lineageTagRows,
+  );
 
   const ranked = activeRows
     .map((row) => {
@@ -1233,6 +1249,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
       const decayScore = row.decay_score ?? 1;
       const linkBoost = linkBoosts.get(row.id) ?? 0;
       const centralityBoost = centralityBoosts.get(row.id) ?? 0;
+      const lineageBoost = lineageBoosts.get(row.id) ?? 0;
       return {
         ...row,
         lexical_score: lexicalScore,
@@ -1240,7 +1257,8 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
         top_bonus: fusedScore?.topBonus ?? 0,
         link_boost: linkBoost,
         centrality_boost: centralityBoost,
-        score: (fusedScore?.score ?? 0) + (fusedScore?.topBonus ?? 0) + lexicalScore * 0.1 + centralityBoost * 0.12 + (row.strength ?? 1) * 0.03 + decayScore * 0.1,
+        lineage_boost: lineageBoost,
+        score: (fusedScore?.score ?? 0) + (fusedScore?.topBonus ?? 0) + lexicalScore * 0.1 + centralityBoost * 0.12 + linkBoost + lineageBoost + (row.strength ?? 1) * 0.03 + decayScore * 0.1,
       };
     })
     .filter((row) => row.score > 0)
@@ -1262,7 +1280,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
     } catch {}
   }
 
-  const localRanked = finalRanked.filter((row) => row.record_kind === "compaction_item" || (row.link_boost ?? 0) > 0 || (row.lexical_score ?? 0) > 0.12);
+  const localRanked = finalRanked.filter((row) => row.record_kind === "compaction_item" || (row.link_boost ?? 0) > 0 || (row.lineage_boost ?? 0) > 0 || (row.lexical_score ?? 0) > 0.12);
   const globalRanked = finalRanked.filter((row) => row.source_kind === "digest" || row.source_kind === "episodic" || row.record_kind === "artifact");
   const selectedRanked = mode === "local"
     ? (localRanked.length ? localRanked : finalRanked)
@@ -1316,6 +1334,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
   const traces: TraceRow[] = budgetedRanked.slice(0, Math.max(limit * 3, 8)).map((row) => ({
     id: row.id,
     record_kind: row.record_kind ?? "artifact",
+    record_id: row.record_id ?? null,
     source_kind: row.source_kind,
     score: Number(row.score.toFixed(4)),
     fused_score: Number((row.fused_score ?? 0).toFixed(4)),
@@ -1323,6 +1342,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
     lexical_score: Number((row.lexical_score ?? 0).toFixed(4)),
     link_boost: Number((row.link_boost ?? 0).toFixed(4)),
     centrality_boost: Number((row.centrality_boost ?? 0).toFixed(4)),
+    lineage_boost: Number((row.lineage_boost ?? 0).toFixed(4)),
     strength: Number((row.strength ?? 1).toFixed(4)),
     decay_score: Number((row.decay_score ?? 1).toFixed(4)),
   }));

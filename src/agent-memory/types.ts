@@ -18,6 +18,7 @@ export type CompactResponse = {
 export type ArtifactRow = {
   id: number;
   record_kind?: string;
+  record_id?: number;
   source_kind: MemoryKind;
   content: string;
   embedding_json?: string | null;
@@ -33,6 +34,7 @@ export type ArtifactRow = {
   top_bonus?: number;
   link_boost?: number;
   centrality_boost?: number;
+  lineage_boost?: number;
 };
 
 export type RefreshStateRow = {
@@ -74,6 +76,7 @@ export type RecentInvalidationRow = {
 export type TraceRow = {
   id: number;
   record_kind: string;
+  record_id: number | null;
   source_kind: string;
   score: number;
   fused_score: number;
@@ -81,6 +84,7 @@ export type TraceRow = {
   lexical_score: number;
   link_boost: number;
   centrality_boost: number;
+  lineage_boost: number;
   strength: number;
   decay_score: number;
 };
