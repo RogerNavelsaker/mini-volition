@@ -57,6 +57,7 @@ export function ensureSchema(db: Database) {
     last_recalled_at DATETIME,
     decay_score REAL NOT NULL DEFAULT 1.0,
     status TEXT NOT NULL DEFAULT 'active',
+    promoted_compaction_id INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(source_table, source_id)
@@ -183,5 +184,13 @@ export function ensureSchema(db: Database) {
     record_id UNINDEXED,
     agent_name UNINDEXED,
     tokenize = 'porter unicode61'
+  );`);
+  db.run(`CREATE TABLE IF NOT EXISTS agent_memory_prefetch_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_name TEXT NOT NULL,
+    query_hash TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(agent_name, query_hash)
   );`);
 }

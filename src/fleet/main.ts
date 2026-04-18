@@ -45,6 +45,7 @@ const DEFAULT_AGENTS: AgentConfig[] = [
   { name: "codex", model: "o3", socket: "openai.sock" },
 ];
 
+
 function loadConfig(): { agents: AgentConfig[] } {
   const configPath = process.env.FLEET_CONFIG || join(configDir, "fleet.json");
   let agents = [...DEFAULT_AGENTS];

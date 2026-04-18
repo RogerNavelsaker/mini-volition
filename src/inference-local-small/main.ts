@@ -6,6 +6,7 @@ import {
 } from "@huggingface/transformers";
 import { resolveLocalDevice } from "../inference-local/device";
 import { startInferenceServer } from "../inference-local/server";
+import { buildScribePrompt } from "../inference-local/scribe-prompts";
 
 const socketPath = resolve(process.env.INFERENCE_LOCAL_SMALL_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/light.sock"));
 const modelId = process.env.INFERENCE_LOCAL_SMALL_MODEL || "onnx-community/gemma-4-E2B-it-ONNX";
@@ -241,7 +242,7 @@ ${text.slice(0, 1800)}`;
         throw new Error("scribe requires a non-empty task string");
       }
       const scribeName = typeof request.name === "string" ? request.name.trim() : "scribe";
-      const prompt = `You are ${scribeName}, a local scribe in a persistent multi-agent runtime. You have been delegated the following task by a cloud agent. Complete it concisely and return your result as plain text.\n\nTask:\n${request.task.trim().slice(0, 2400)}`;
+      const prompt = buildScribePrompt(scribeName, request.task);
       const result = await generate(prompt);
       return { result, source: modelId };
     }

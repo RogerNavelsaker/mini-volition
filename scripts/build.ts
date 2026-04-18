@@ -52,6 +52,7 @@ const runtimeModules = [
   ["agent-memory", "agent-memory"],
   ["fleet-reporter", "fleet-reporter"],
   ["fleet-librarian", "fleet-librarian"],
+  ["fleet-digest", "fleet-digest"],
   ["inference-local-embed", "inference-local-embed"],
   ["inference-local-rerank", "inference-local-rerank"],
   ["inference-local-small", "inference-local-small"],
