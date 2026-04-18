@@ -76,6 +76,20 @@ export function ensureSchema(db: Database) {
     error_streak INTEGER NOT NULL DEFAULT 0,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
+  db.run(`CREATE TABLE IF NOT EXISTS agent_memory_retention_policies (
+    agent_name TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    min_importance TEXT NOT NULL DEFAULT 'normal',
+    max_age_days INTEGER,
+    max_items INTEGER,
+    compact_after_days INTEGER,
+    archive_after_days INTEGER,
+    prune_after_days INTEGER,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (agent_name, source_kind)
+  );`);
   db.run(`CREATE TABLE IF NOT EXISTS agent_memory_lookup_cache (
     agent_name TEXT NOT NULL,
     cache_key TEXT NOT NULL,

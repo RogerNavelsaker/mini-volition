@@ -7,6 +7,7 @@ import { computeNodeCentrality } from "./centrality";
 import { selectCompactionCandidates } from "./compaction";
 import { relationForItemKinds, upsertMemoryLink, invalidateMemoryLinks, timelineQueryTokens } from "./links";
 import { consolidateExtractedFacts, deriveFacts, invalidateMemoryFacts, upsertMemoryFact } from "./facts";
+import { getRetentionPolicy, isImportanceLevel, isMemoryKind, listRetentionPolicies, upsertRetentionPolicy } from "./retention";
 import { selectBudgetedRows } from "./retrieval";
 import { ensureSchema } from "./schema";
 import { appendMemoryArtifact, appendMemorySourceArtifact } from "../state-artifacts/lib";
@@ -63,7 +64,7 @@ const decayFloor = Math.max(0, Math.min(1, parseFloat(process.env.FLEET_MEMORY_D
 const rrfK = Math.max(1, parseInt(process.env.FLEET_MEMORY_RRF_K || "60", 10) || 60);
 
 function usage(): never {
-  console.error("Usage: agent-memory <refresh|repair|reinforce|decay|rebalance|compact|lookup|invalidate|timeline|status|rebuild|verify|list|push-verbatim|skill> ...");
+  console.error("Usage: agent-memory <refresh|repair|reinforce|decay|rebalance|compact|extract|lookup|invalidate|timeline|status|retention-get|retention-set|retention-list|rebuild|verify|list|push-verbatim|skill> ...");
   process.exit(64);
 }
 
@@ -1476,6 +1477,57 @@ function timeline(agentName: string, query: string, limit = 12) {
   console.log(JSON.stringify({ query, events }));
 }
 
+function retentionGet(agentName: string, sourceKind: string) {
+  if (!isMemoryKind(sourceKind)) {
+    console.error("Usage: agent-memory retention-get <agent> <digest|episodic|archival|verbatim>");
+    process.exit(64);
+  }
+  console.log(JSON.stringify(getRetentionPolicy(db, agentName, sourceKind)));
+}
+
+function retentionList(agentName: string) {
+  console.log(JSON.stringify({ agent_name: agentName, policies: listRetentionPolicies(db, agentName) }));
+}
+
+function retentionSet(
+  agentName: string,
+  sourceKind: string,
+  minImportance: string,
+  maxAgeDaysArg: string | undefined,
+  maxItemsArg: string | undefined,
+  compactAfterDaysArg: string | undefined,
+  archiveAfterDaysArg: string | undefined,
+  pruneAfterDaysArg: string | undefined,
+  enabledArg: string | undefined,
+) {
+  if (!isMemoryKind(sourceKind)) {
+    console.error("retention source_kind must be one of: digest, episodic, archival, verbatim");
+    process.exit(64);
+  }
+  if (!isImportanceLevel(minImportance)) {
+    console.error("retention min_importance must be one of: low, normal, high, critical");
+    process.exit(64);
+  }
+  const policy = upsertRetentionPolicy(
+    db,
+    agentName,
+    sourceKind,
+    minImportance,
+    maxAgeDaysArg === "" ? null : parseInt(maxAgeDaysArg || "", 10) || null,
+    maxItemsArg === "" ? null : parseInt(maxItemsArg || "", 10) || null,
+    compactAfterDaysArg === "" ? null : parseInt(compactAfterDaysArg || "", 10) || null,
+    archiveAfterDaysArg === "" ? null : parseInt(archiveAfterDaysArg || "", 10) || null,
+    pruneAfterDaysArg === "" ? null : parseInt(pruneAfterDaysArg || "", 10) || null,
+    enabledArg === undefined ? 1 : (enabledArg === "0" || enabledArg.toLowerCase() === "false" ? 0 : 1),
+  );
+  appendMemoryArtifact(agentName, {
+    record_type: "retention_policy",
+    event: "upsert",
+    policy,
+  });
+  console.log(JSON.stringify(policy));
+}
+
 function rebuildMemory(agentName?: string) {
   invalidateLookupCache(db, agentName);
   const memoryRoot = stateDir("memory");
@@ -1520,8 +1572,10 @@ function rebuildMemory(agentName?: string) {
     if (agents.length > 0) {
       const placeholders = agents.map(() => "?").join(", ");
       db.prepare(`DELETE FROM agent_memory_refresh_state WHERE agent_name IN (${placeholders})`).run(...agents);
+      db.prepare(`DELETE FROM agent_memory_retention_policies WHERE agent_name IN (${placeholders})`).run(...agents);
     } else {
       db.exec("DELETE FROM agent_memory_refresh_state;");
+      db.exec("DELETE FROM agent_memory_retention_policies;");
     }
 
     for (const name of agents) {
@@ -1531,6 +1585,7 @@ function rebuildMemory(agentName?: string) {
       const rows = readJsonl(stateDir("memory", `${name}.jsonl`));
       const artifacts = new Map<number, any>();
       const refreshStates = new Map<string, any>();
+      const retentionPolicies = new Map<string, any>();
       const compactions = new Map<number, any>();
       const compactionItems = new Map<number, any>();
       const links = new Map<number, any>();
@@ -1582,6 +1637,9 @@ function rebuildMemory(agentName?: string) {
         } else if (row.record_type === "refresh_state" && row.refresh_state && typeof row.refresh_state === "object") {
           const value = row.refresh_state as any;
           if (value.agent_name) refreshStates.set(String(value.agent_name), value);
+        } else if (row.record_type === "retention_policy" && row.policy && typeof row.policy === "object") {
+          const value = row.policy as any;
+          if (value.source_kind) retentionPolicies.set(String(value.source_kind), value);
         } else if (row.record_type === "compaction" && row.compaction && typeof row.compaction === "object") {
           const value = row.compaction as any;
           if (value.id != null) compactions.set(Number(value.id), value);
@@ -1625,6 +1683,28 @@ function rebuildMemory(agentName?: string) {
           state.agent_name, state.last_refresh_at ?? null, state.last_status ?? null, state.last_error ?? null,
           state.artifact_count ?? 0, state.source ?? null, state.error_streak ?? 0,
           state.updated_at ?? state.last_refresh_at ?? new Date().toISOString(),
+        );
+      }
+
+      const insertRetention = db.prepare(
+        `INSERT INTO agent_memory_retention_policies (
+           agent_name, source_kind, min_importance, max_age_days, max_items,
+           compact_after_days, archive_after_days, prune_after_days, enabled, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const policy of retentionPolicies.values()) {
+        insertRetention.run(
+          policy.agent_name ?? name,
+          policy.source_kind,
+          policy.min_importance ?? "normal",
+          policy.max_age_days ?? null,
+          policy.max_items ?? null,
+          policy.compact_after_days ?? null,
+          policy.archive_after_days ?? null,
+          policy.prune_after_days ?? null,
+          policy.enabled ?? 1,
+          policy.created_at ?? policy.updated_at ?? new Date().toISOString(),
+          policy.updated_at ?? policy.created_at ?? new Date().toISOString(),
         );
       }
 
@@ -1689,6 +1769,7 @@ function rebuildMemory(agentName?: string) {
         source_archival: archivalRows.length,
         artifact_records: artifacts.size,
         refresh_records: refreshStates.size,
+        retention_policies: retentionPolicies.size,
         compactions: compactions.size,
         compaction_items: compactionItems.size,
         links: links.size,
@@ -1738,6 +1819,11 @@ function verifyMemory(agentName?: string) {
     const expectedDerived = readJsonl(stateDir("memory", `${name}.jsonl`));
     const expectedArtifacts = expectedDerived.filter((row) => row.record_type === "artifact").length;
     const expectedRefresh = expectedDerived.filter((row) => row.record_type === "refresh_state").length;
+    const expectedRetention = new Set(
+      expectedDerived
+        .filter((row) => row.record_type === "retention_policy" && row.policy && typeof row.policy === "object")
+        .map((row) => String((row.policy as Record<string, unknown>).source_kind ?? "")),
+    ).size;
     const expectedCompactions = expectedDerived.filter((row) => row.record_type === "compaction").length;
     const expectedItems = expectedDerived.filter((row) => row.record_type === "compaction_item").length;
     const expectedLinks = expectedDerived.filter((row) => row.record_type === "link").length;
@@ -1748,6 +1834,7 @@ function verifyMemory(agentName?: string) {
       archival: Number((db.prepare("SELECT COUNT(*) AS count FROM tier3_archival WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0),
       artifacts: Number((db.prepare("SELECT COUNT(*) AS count FROM agent_memory_artifacts WHERE agent_name = ? OR agent_name IS NULL").get(name) as { count: number } | null)?.count ?? 0),
       refresh: Number((db.prepare("SELECT COUNT(*) AS count FROM agent_memory_refresh_state WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0),
+      retention: Number((db.prepare("SELECT COUNT(*) AS count FROM agent_memory_retention_policies WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0),
       compactions: Number((db.prepare("SELECT COUNT(*) AS count FROM agent_memory_compactions WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0),
       items: Number((db.prepare("SELECT COUNT(*) AS count FROM agent_memory_compaction_items WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0),
       links: Number((db.prepare("SELECT COUNT(*) AS count FROM agent_memory_links WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0),
@@ -1759,6 +1846,7 @@ function verifyMemory(agentName?: string) {
       archival: expectedArchival,
       artifacts: expectedArtifacts,
       refresh: Math.min(expectedRefresh, 1),
+      retention: expectedRetention,
       compactions: expectedCompactions,
       items: expectedItems,
       links: expectedLinks,
@@ -1784,6 +1872,42 @@ function verifyMemory(agentName?: string) {
       if (!actual) { contentDrift.push(`fact:${fact.id} missing from db`); continue; }
       if (actual.subject !== fact.subject || actual.predicate !== fact.predicate || actual.object !== fact.object) {
         contentDrift.push(`fact:${fact.id} SPO differs: expected ${fact.subject}/${fact.predicate}/${fact.object}, actual ${actual.subject}/${actual.predicate}/${actual.object}`);
+      }
+    }
+    const derivedPolicies = expectedDerived.filter((row) => row.record_type === "retention_policy" && row.event === "upsert" && row.policy);
+    for (const row of derivedPolicies.slice(-8)) {
+      const policy = row.policy as {
+        source_kind?: string;
+        min_importance?: string;
+        max_age_days?: number | null;
+        max_items?: number | null;
+        compact_after_days?: number | null;
+        archive_after_days?: number | null;
+        prune_after_days?: number | null;
+        enabled?: number;
+      } | null;
+      if (!policy?.source_kind) continue;
+      const actual = db.prepare(
+        `SELECT min_importance, max_age_days, max_items, compact_after_days, archive_after_days, prune_after_days, enabled
+         FROM agent_memory_retention_policies
+         WHERE agent_name = ? AND source_kind = ?`,
+      ).get(name, policy.source_kind) as {
+        min_importance: string;
+        max_age_days: number | null;
+        max_items: number | null;
+        compact_after_days: number | null;
+        archive_after_days: number | null;
+        prune_after_days: number | null;
+        enabled: number;
+      } | null;
+      if (!actual) {
+        contentDrift.push(`retention:${policy.source_kind} missing from db`);
+        continue;
+      }
+      for (const field of ["min_importance", "max_age_days", "max_items", "compact_after_days", "archive_after_days", "prune_after_days", "enabled"] as const) {
+        if ((actual[field] ?? null) !== (policy[field] ?? null)) {
+          contentDrift.push(`retention:${policy.source_kind} ${field} differs`);
+        }
       }
     }
     return {
@@ -1889,6 +2013,24 @@ if (cmd === "refresh") {
     process.exit(64);
   }
   console.log(JSON.stringify(db.prepare("SELECT * FROM agent_memory_refresh_state WHERE agent_name = ?").get(arg1) ?? null));
+} else if (cmd === "retention-get") {
+  if (!arg1 || !arg2) {
+    console.error("Usage: agent-memory retention-get <agent> <digest|episodic|archival|verbatim>");
+    process.exit(64);
+  }
+  retentionGet(arg1, arg2);
+} else if (cmd === "retention-list") {
+  if (!arg1) {
+    console.error("Usage: agent-memory retention-list <agent>");
+    process.exit(64);
+  }
+  retentionList(arg1);
+} else if (cmd === "retention-set") {
+  if (!arg1 || !arg2 || !Bun.argv[5]) {
+    console.error("Usage: agent-memory retention-set <agent> <digest|episodic|archival|verbatim> <low|normal|high|critical> [maxAgeDays] [maxItems] [compactAfterDays] [archiveAfterDays] [pruneAfterDays] [enabled]");
+    process.exit(64);
+  }
+  retentionSet(arg1, arg2, Bun.argv[5], Bun.argv[6], Bun.argv[7], Bun.argv[8], Bun.argv[9], Bun.argv[10], Bun.argv[11]);
 } else if (cmd === "rebuild") {
   rebuildMemory(arg1);
 } else if (cmd === "verify") {
