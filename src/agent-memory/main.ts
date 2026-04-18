@@ -6,6 +6,7 @@ import { buildLookupCacheKey, invalidateLookupCache, readLookupCache, resolveLoo
 import { computeNodeCentrality } from "./centrality";
 import { selectCompactionCandidates } from "./compaction";
 import { relationForItemKinds, upsertMemoryLink, invalidateMemoryLinks, timelineQueryTokens } from "./links";
+import { inheritLineageTags, listLineageTags, seedCompactionItemLineage } from "./lineage";
 import { consolidateExtractedFacts, deriveFacts, invalidateMemoryFacts, upsertMemoryFact } from "./facts";
 import { getRetentionPolicy, isImportanceLevel, isMemoryKind, listRetentionPolicies, upsertRetentionPolicy } from "./retention";
 import { selectBudgetedRows } from "./retrieval";
@@ -64,7 +65,7 @@ const decayFloor = Math.max(0, Math.min(1, parseFloat(process.env.FLEET_MEMORY_D
 const rrfK = Math.max(1, parseInt(process.env.FLEET_MEMORY_RRF_K || "60", 10) || 60);
 
 function usage(): never {
-  console.error("Usage: agent-memory <refresh|repair|reinforce|decay|rebalance|compact|extract|lookup|invalidate|timeline|status|retention-get|retention-set|retention-list|rebuild|verify|list|push-verbatim|skill> ...");
+  console.error("Usage: agent-memory <refresh|repair|reinforce|decay|rebalance|compact|extract|lookup|invalidate|timeline|status|lineage-get|retention-get|retention-set|retention-list|rebuild|verify|list|push-verbatim|skill> ...");
   process.exit(64);
 }
 
@@ -372,6 +373,10 @@ function snapshotFact(id: number) {
 
 function snapshotLink(id: number) {
   return db.prepare("SELECT * FROM agent_memory_links WHERE id = ?").get(id) as Record<string, unknown> | null;
+}
+
+function snapshotLineageTag(id: number) {
+  return db.prepare("SELECT * FROM agent_memory_lineage_tags WHERE id = ?").get(id) as Record<string, unknown> | null;
 }
 
 function requestCompact(entries: string[], goal: string): Promise<CompactResponse> {
@@ -890,6 +895,13 @@ async function compact(agentName: string) {
           event: "created",
           item: snapshotCompactionItem(itemId.id),
         });
+        for (const tag of seedCompactionItemLineage(db, agentName, compactionId.id, itemId.id, item.kind)) {
+          appendMemoryArtifact(agentName, {
+            record_type: "lineage_tag",
+            event: "upsert",
+            lineage_tag: snapshotLineageTag(tag.id),
+          });
+        }
       }
     }
     // Embed link evidence and upsert links into search index for semantic link discovery
@@ -958,6 +970,13 @@ async function compact(agentName: string) {
           event: "upsert",
           fact: snapshotFact(factId.id),
         });
+        for (const tag of inheritLineageTags(db, agentName, "compaction_item", sourceItemId, "fact", factId.id, "derive_fact")) {
+          appendMemoryArtifact(agentName, {
+            record_type: "lineage_tag",
+            event: "upsert",
+            lineage_tag: snapshotLineageTag(tag.id),
+          });
+        }
       }
     }
     const existingItems = db.prepare(
@@ -1039,6 +1058,13 @@ async function extractEntities(agentName: string) {
         event: "upsert",
         fact: snapshotFact(factId.id),
       });
+      for (const tag of inheritLineageTags(db, agentName, "compaction_item", entry.sourceItemId, "fact", factId.id, "extract_entities")) {
+        appendMemoryArtifact(agentName, {
+          record_type: "lineage_tag",
+          event: "upsert",
+          lineage_tag: snapshotLineageTag(tag.id),
+        });
+      }
       stored++;
     }
   }
@@ -1489,6 +1515,19 @@ function retentionList(agentName: string) {
   console.log(JSON.stringify({ agent_name: agentName, policies: listRetentionPolicies(db, agentName) }));
 }
 
+function lineageGet(agentName: string, recordKind: string, recordId: string) {
+  if ((recordKind !== "compaction_item" && recordKind !== "fact") || !recordId) {
+    console.error("Usage: agent-memory lineage-get <agent> <compaction_item|fact> <recordId>");
+    process.exit(64);
+  }
+  console.log(JSON.stringify({
+    agent_name: agentName,
+    record_kind: recordKind,
+    record_id: Number(recordId),
+    tags: listLineageTags(db, agentName, recordKind, Number(recordId)),
+  }));
+}
+
 function retentionSet(
   agentName: string,
   sourceKind: string,
@@ -1564,6 +1603,7 @@ function rebuildMemory(agentName?: string) {
     db.exec("DELETE FROM public_digests;");
     db.exec("DELETE FROM agent_memory_search_fts;");
     db.exec("DELETE FROM agent_memory_search_index;");
+    db.exec("DELETE FROM agent_memory_lineage_tags;");
     db.exec("DELETE FROM agent_memory_facts;");
     db.exec("DELETE FROM agent_memory_links;");
     db.exec("DELETE FROM agent_memory_compaction_items;");
@@ -1590,6 +1630,7 @@ function rebuildMemory(agentName?: string) {
       const compactionItems = new Map<number, any>();
       const links = new Map<number, any>();
       const facts = new Map<number, any>();
+      const lineageTags = new Map<number, any>();
 
       const insertWorking = db.prepare(
         `INSERT INTO tier1_working (agent_name, role, content, timestamp)
@@ -1652,6 +1693,9 @@ function rebuildMemory(agentName?: string) {
         } else if (row.record_type === "fact" && row.fact && typeof row.fact === "object") {
           const value = row.fact as any;
           if (value.id != null) facts.set(Number(value.id), value);
+        } else if (row.record_type === "lineage_tag" && row.lineage_tag && typeof row.lineage_tag === "object") {
+          const value = row.lineage_tag as any;
+          if (value.id != null) lineageTags.set(Number(value.id), value);
         }
       }
 
@@ -1762,6 +1806,27 @@ function rebuildMemory(agentName?: string) {
         upsertSearchIndex("fact", fact.id, fact.agent_name, "archival", `${fact.subject} ${fact.predicate} ${fact.object}`, []);
       }
 
+      const insertLineageTag = db.prepare(
+        `INSERT INTO agent_memory_lineage_tags (
+           id, agent_name, record_kind, record_id, tag, provenance, inherited_from_kind, inherited_from_id, depth, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const tag of [...lineageTags.values()].sort((a, b) => Number(a.id) - Number(b.id))) {
+        insertLineageTag.run(
+          tag.id,
+          tag.agent_name,
+          tag.record_kind,
+          tag.record_id,
+          tag.tag,
+          tag.provenance ?? null,
+          tag.inherited_from_kind ?? null,
+          tag.inherited_from_id ?? null,
+          tag.depth ?? 0,
+          tag.created_at ?? tag.updated_at ?? new Date().toISOString(),
+          tag.updated_at ?? tag.created_at ?? new Date().toISOString(),
+        );
+      }
+
       summary.push({
         agent: name,
         source_working: workingRows.length,
@@ -1774,6 +1839,7 @@ function rebuildMemory(agentName?: string) {
         compaction_items: compactionItems.size,
         links: links.size,
         facts: facts.size,
+        lineage_tags: lineageTags.size,
       });
     }
 
@@ -1828,6 +1894,7 @@ function verifyMemory(agentName?: string) {
     const expectedItems = expectedDerived.filter((row) => row.record_type === "compaction_item").length;
     const expectedLinks = expectedDerived.filter((row) => row.record_type === "link").length;
     const expectedFacts = expectedDerived.filter((row) => row.record_type === "fact").length;
+    const expectedLineageTags = expectedDerived.filter((row) => row.record_type === "lineage_tag").length;
     const actual = {
       working: Number((db.prepare("SELECT COUNT(*) AS count FROM tier1_working WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0),
       episodic: Number((db.prepare("SELECT COUNT(*) AS count FROM tier2_episodic WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0),
@@ -1839,6 +1906,7 @@ function verifyMemory(agentName?: string) {
       items: Number((db.prepare("SELECT COUNT(*) AS count FROM agent_memory_compaction_items WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0),
       links: Number((db.prepare("SELECT COUNT(*) AS count FROM agent_memory_links WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0),
       facts: Number((db.prepare("SELECT COUNT(*) AS count FROM agent_memory_facts WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0),
+      lineage_tags: Number((db.prepare("SELECT COUNT(*) AS count FROM agent_memory_lineage_tags WHERE agent_name = ?").get(name) as { count: number } | null)?.count ?? 0),
     };
     const expected = {
       working: expectedWorking,
@@ -1851,6 +1919,7 @@ function verifyMemory(agentName?: string) {
       items: expectedItems,
       links: expectedLinks,
       facts: expectedFacts,
+      lineage_tags: expectedLineageTags,
     };
     const driftFields = Object.keys(expected).filter((key) => (expected as any)[key] !== (actual as any)[key]);
     // Row-level content drift: sample recent compaction items and facts
@@ -1908,6 +1977,29 @@ function verifyMemory(agentName?: string) {
         if ((actual[field] ?? null) !== (policy[field] ?? null)) {
           contentDrift.push(`retention:${policy.source_kind} ${field} differs`);
         }
+      }
+    }
+    const derivedLineage = expectedDerived.filter((row) => row.record_type === "lineage_tag" && row.event === "upsert" && row.lineage_tag);
+    for (const row of derivedLineage.slice(-12)) {
+      const tag = row.lineage_tag as {
+        id?: number;
+        tag?: string;
+        record_kind?: string;
+        record_id?: number;
+        depth?: number;
+      } | null;
+      if (!tag?.id) continue;
+      const actual = db.prepare(
+        `SELECT tag, record_kind, record_id, depth
+         FROM agent_memory_lineage_tags
+         WHERE id = ?`,
+      ).get(tag.id) as { tag: string; record_kind: string; record_id: number; depth: number } | null;
+      if (!actual) {
+        contentDrift.push(`lineage_tag:${tag.id} missing from db`);
+        continue;
+      }
+      if (actual.tag !== tag.tag || actual.record_kind !== tag.record_kind || actual.record_id !== tag.record_id || actual.depth !== (tag.depth ?? 0)) {
+        contentDrift.push(`lineage_tag:${tag.id} differs`);
       }
     }
     return {
@@ -2013,6 +2105,12 @@ if (cmd === "refresh") {
     process.exit(64);
   }
   console.log(JSON.stringify(db.prepare("SELECT * FROM agent_memory_refresh_state WHERE agent_name = ?").get(arg1) ?? null));
+} else if (cmd === "lineage-get") {
+  if (!arg1 || !arg2 || !Bun.argv[5]) {
+    console.error("Usage: agent-memory lineage-get <agent> <compaction_item|fact> <recordId>");
+    process.exit(64);
+  }
+  lineageGet(arg1, arg2, Bun.argv[5]);
 } else if (cmd === "retention-get") {
   if (!arg1 || !arg2) {
     console.error("Usage: agent-memory retention-get <agent> <digest|episodic|archival|verbatim>");

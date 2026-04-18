@@ -90,6 +90,20 @@ export function ensureSchema(db: Database) {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (agent_name, source_kind)
   );`);
+  db.run(`CREATE TABLE IF NOT EXISTS agent_memory_lineage_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_name TEXT NOT NULL,
+    record_kind TEXT NOT NULL,
+    record_id INTEGER NOT NULL,
+    tag TEXT NOT NULL,
+    provenance TEXT,
+    inherited_from_kind TEXT,
+    inherited_from_id INTEGER,
+    depth INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(agent_name, record_kind, record_id, tag)
+  );`);
   db.run(`CREATE TABLE IF NOT EXISTS agent_memory_lookup_cache (
     agent_name TEXT NOT NULL,
     cache_key TEXT NOT NULL,
