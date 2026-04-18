@@ -398,6 +398,12 @@ function withDb<T>(fn: (db: Database) => T): T {
     urgent_preempt INTEGER NOT NULL DEFAULT 0,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
+  db.run(`CREATE TABLE IF NOT EXISTS fleet_escalation_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_name TEXT NOT NULL,
+    reason TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
   db.run(`CREATE TABLE IF NOT EXISTS fleet_event_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type TEXT NOT NULL,
@@ -604,6 +610,64 @@ function governorResetFailures(agent: string) {
   });
 }
 
+function governorRecordEscalation(agent: string, threshold: number, cooldownSec: number, reason: string | null) {
+  return withDb((db) => {
+    db.run(
+      `INSERT INTO fleet_escalation_log (agent_name, reason) VALUES (?, ?)`,
+      [agent, reason ?? null],
+    );
+    const windowStart = new Date(Date.now() - cooldownSec * 1000).toISOString();
+    const row = db.prepare(
+      `SELECT COUNT(*) as cnt FROM fleet_escalation_log WHERE agent_name = ? AND datetime(created_at) >= datetime(?)`,
+    ).get(agent, windowStart) as { cnt: number };
+    const count = row?.cnt ?? 1;
+    const shouldCooldown = count >= threshold;
+    const cooldownUntil = shouldCooldown ? isoAfterSeconds(cooldownSec) : null;
+    if (shouldCooldown) {
+      db.run(
+        `INSERT INTO fleet_governor (agent_name, window_started_at, turn_count, forced_cooldown_until, last_reason, updated_at)
+         VALUES (?, CURRENT_TIMESTAMP, 0, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(agent_name) DO UPDATE SET
+           forced_cooldown_until = excluded.forced_cooldown_until,
+           last_reason = excluded.last_reason,
+           updated_at = CURRENT_TIMESTAMP`,
+        [agent, cooldownUntil, reason ?? "escalation threshold reached"],
+      );
+    }
+    appendFleetArtifact("governor", {
+      record_type: "governor",
+      event: "escalation_recorded",
+      agent_name: agent,
+      escalation_count: count,
+      threshold,
+      cooled_down: shouldCooldown,
+      cooldown_until: cooldownUntil,
+      reason,
+    });
+    return { agent_name: agent, escalation_count: count, threshold, cooled_down: shouldCooldown, cooldown_until: cooldownUntil };
+  });
+}
+
+function governorEscalationStatus(agent: string, windowSec: number) {
+  return withDb((db) => {
+    const windowStart = new Date(Date.now() - windowSec * 1000).toISOString();
+    const row = db.prepare(
+      `SELECT COUNT(*) as cnt FROM fleet_escalation_log WHERE agent_name = ? AND datetime(created_at) >= datetime(?)`,
+    ).get(agent, windowStart) as { cnt: number };
+    const count = row?.cnt ?? 0;
+    const latest = db.prepare(
+      `SELECT reason, created_at FROM fleet_escalation_log WHERE agent_name = ? ORDER BY id DESC LIMIT 1`,
+    ).get(agent) as { reason: string | null; created_at: string } | null;
+    return {
+      agent_name: agent,
+      escalation_count: count,
+      window_sec: windowSec,
+      latest_reason: latest?.reason ?? null,
+      latest_at: latest?.created_at ?? null,
+    };
+  });
+}
+
 function startSession() {
   requireCmd("zellij");
 
@@ -761,6 +825,12 @@ switch (process.argv[2]) {
     break;
   case "governor-urgent-preempt":
     console.log(JSON.stringify(governorUrgentPreempt(process.argv[3] || "")));
+    break;
+  case "governor-record-escalation":
+    console.log(JSON.stringify(governorRecordEscalation(process.argv[3] || "", Math.max(1, parseInt(process.argv[4] || "3", 10) || 3), Math.max(1, parseInt(process.argv[5] || "300", 10) || 300), process.argv[6] ?? null)));
+    break;
+  case "governor-escalation-status":
+    console.log(JSON.stringify(governorEscalationStatus(process.argv[3] || "", Math.max(1, parseInt(process.argv[4] || "300", 10) || 300))));
     break;
   case "rebuild-governor":
     await rebuildGovernor();
