@@ -1,11 +1,13 @@
 import { join, resolve, dirname } from "path";
 import { env, pipeline } from "@huggingface/transformers";
+import { resolveLocalDevice } from "../inference-local/device";
 import { startInferenceServer } from "../inference-local/server";
 
 const socketPath = resolve(process.env.INFERENCE_LOCAL_EMBED_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/embed.sock"));
 const modelId = process.env.INFERENCE_LOCAL_EMBED_MODEL || "Xenova/bge-m3";
 const modelDType = process.env.INFERENCE_LOCAL_EMBED_DTYPE || "q8";
 const cacheDir = process.env.INFERENCE_LOCAL_CACHE_DIR || `${dirname(socketPath)}/.cache/transformers`;
+const deviceConfig = resolveLocalDevice("embed");
 
 env.allowRemoteModels = true;
 env.allowLocalModels = true;
@@ -17,10 +19,10 @@ let embedderPromise: Promise<any> | null = null;
 async function getEmbedder() {
   if (!embedderPromise) {
     embedderPromise = (async () => {
-      console.log(`[EMBED] Loading model ${modelId} with dtype=${modelDType}`);
+      console.log(`[EMBED] Loading model ${modelId} with dtype=${modelDType} device=${deviceConfig.device} source=${deviceConfig.source}`);
       return pipeline("feature-extraction", modelId, {
         dtype: modelDType as any,
-        device: "cpu",
+        device: deviceConfig.device as any,
       });
     })();
   }

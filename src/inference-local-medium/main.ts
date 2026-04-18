@@ -4,6 +4,7 @@ import {
   AutoModelForImageTextToText,
   env,
 } from "@huggingface/transformers";
+import { resolveLocalDevice } from "../inference-local/device";
 import { startInferenceServer } from "../inference-local/server";
 
 const socketPath = resolve(process.env.INFERENCE_LOCAL_MEDIUM_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/heavy.sock"));
@@ -11,6 +12,7 @@ const modelId = process.env.INFERENCE_LOCAL_MEDIUM_MODEL || "onnx-community/gemm
 const modelDType = process.env.INFERENCE_LOCAL_MEDIUM_DTYPE || "q4f16";
 const maxNewTokens = Number(process.env.INFERENCE_LOCAL_MEDIUM_MAX_TOKENS || "320");
 const cacheDir = process.env.INFERENCE_LOCAL_CACHE_DIR || `${dirname(socketPath)}/.cache/transformers`;
+const deviceConfig = resolveLocalDevice("medium");
 
 env.allowRemoteModels = true;
 env.allowLocalModels = true;
@@ -25,11 +27,11 @@ let modelPromise: Promise<{
 async function getModel() {
   if (!modelPromise) {
     modelPromise = (async () => {
-      console.log(`[MEDIUM] Loading model ${modelId} with dtype=${modelDType}`);
+      console.log(`[MEDIUM] Loading model ${modelId} with dtype=${modelDType} device=${deviceConfig.device} source=${deviceConfig.source}`);
       const processor = await AutoProcessor.from_pretrained(modelId);
       const model = await AutoModelForImageTextToText.from_pretrained(modelId, {
         dtype: modelDType as any,
-        device: "cpu",
+        device: deviceConfig.device as any,
       });
       return { processor, model };
     })();

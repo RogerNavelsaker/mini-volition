@@ -4,12 +4,14 @@ import {
   AutoTokenizer,
   env,
 } from "@huggingface/transformers";
+import { resolveLocalDevice } from "../inference-local/device";
 import { startInferenceServer } from "../inference-local/server";
 
 const socketPath = resolve(process.env.INFERENCE_LOCAL_RERANK_SOCKET || join(process.env.META_REPO_ROOT || ".", "runtime/rerank.sock"));
 const modelId = process.env.INFERENCE_LOCAL_RERANK_MODEL || "onnx-community/bge-reranker-v2-m3-ONNX";
 const modelDType = process.env.INFERENCE_LOCAL_RERANK_DTYPE || "q4";
 const cacheDir = process.env.INFERENCE_LOCAL_CACHE_DIR || `${dirname(socketPath)}/.cache/transformers`;
+const deviceConfig = resolveLocalDevice("rerank");
 
 env.allowRemoteModels = true;
 env.allowLocalModels = true;
@@ -24,11 +26,11 @@ let rerankerPromise: Promise<{
 async function getReranker() {
   if (!rerankerPromise) {
     rerankerPromise = (async () => {
-      console.log(`[RERANK] Loading model ${modelId} with dtype=${modelDType}`);
+      console.log(`[RERANK] Loading model ${modelId} with dtype=${modelDType} device=${deviceConfig.device} source=${deviceConfig.source}`);
       const tokenizer = await AutoTokenizer.from_pretrained(modelId);
       const model = await AutoModelForSequenceClassification.from_pretrained(modelId, {
         dtype: modelDType as any,
-        device: "cpu",
+        device: deviceConfig.device as any,
       });
       return { tokenizer, model };
     })();
