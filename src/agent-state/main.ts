@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { execFileSync } from "child_process";
+import { createHash } from "crypto";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 import { appendActionArtifact, appendReviewArtifact, appendRuntimeArtifact, appendTurnArtifact } from "../state-artifacts/lib";
@@ -42,7 +43,9 @@ type RuntimeStateRow = {
   last_error: string | null;
   cooldown_until: string | null;
   last_message_id: number | null;
+  transition_hash: string | null;
 };
+type RuntimeStateSnapshot = Omit<RuntimeStateRow, "transition_hash">;
 const HEALTH_STATUSES = ["active", "latent", "dead"] as const;
 type HealthStatus = (typeof HEALTH_STATUSES)[number];
 const ALLOWED_STATUS_TRANSITIONS: Record<RuntimeStatus, Set<RuntimeStatus>> = {
@@ -69,7 +72,7 @@ function normalizeRuntimeState(
   lastError: string | null,
   cooldownUntil: string | null,
   lastMessageId: number | null,
-): RuntimeStateRow {
+): RuntimeStateSnapshot {
   if (status === "idle") {
     return {
       status,
@@ -117,6 +120,28 @@ function validateRuntimeTransition(previous: RuntimeStatus | null, next: Runtime
   if (!previous) return;
   if (ALLOWED_STATUS_TRANSITIONS[previous].has(next)) return;
   throw new Error(`invalid runtime state transition: ${previous} -> ${next}`);
+}
+
+function hashText(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+function stableTransitionPayload(agentName: string, previous: RuntimeStateRow | null, next: RuntimeStateSnapshot): string {
+  return JSON.stringify({
+    agent_name: agentName,
+    previous_status: previous?.status ?? null,
+    previous_transition_hash: previous?.transition_hash ?? null,
+    next_status: next.status,
+    current_task: next.current_task,
+    wake_reason: next.wake_reason,
+    last_error: next.last_error,
+    cooldown_until: next.cooldown_until,
+    last_message_id: next.last_message_id,
+  });
+}
+
+function computeTransitionHash(agentName: string, previous: RuntimeStateRow | null, next: RuntimeStateSnapshot): string {
+  return hashText(stableTransitionPayload(agentName, previous, next));
 }
 
 function usage(): never {
@@ -172,8 +197,8 @@ function rebuildState(agent?: string) {
       }
       if (latestRuntime) {
         db.prepare(
-          `INSERT INTO fleet_agent_state (agent_name, status, current_task, wake_reason, last_error, cooldown_until, last_message_id, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO fleet_agent_state (agent_name, status, current_task, wake_reason, last_error, cooldown_until, last_message_id, transition_hash, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           name,
           latestRuntime.status ?? "idle",
@@ -182,6 +207,7 @@ function rebuildState(agent?: string) {
           latestRuntime.last_error ?? null,
           latestRuntime.cooldown_until ?? null,
           latestRuntime.last_message_id ?? null,
+          latestRuntime.transition_hash ?? null,
           latestRuntime.recorded_at ?? new Date().toISOString(),
         );
       }
@@ -419,7 +445,7 @@ function verifyState(agent?: string) {
   const verified = agents.map((name) => {
     const runtimeRows = readJsonl(stateDir("runtime", `${name}.jsonl`)).filter((row) => row.record_type === "runtime_state");
     const expectedRuntime = runtimeRows.length ? runtimeRows[runtimeRows.length - 1] : null;
-    const actualRuntime = db.prepare("SELECT status, current_task, wake_reason, last_error, cooldown_until, last_message_id FROM fleet_agent_state WHERE agent_name = ?").get(name) as Record<string, unknown> | null;
+    const actualRuntime = db.prepare("SELECT status, current_task, wake_reason, last_error, cooldown_until, last_message_id, transition_hash FROM fleet_agent_state WHERE agent_name = ?").get(name) as Record<string, unknown> | null;
     const actionRows = readJsonl(stateDir("actions", `${name}.jsonl`)).filter((row) => row.record_type === "action");
     const turnRows = readJsonl(stateDir("turns", `${name}.jsonl`));
     const expectedPhaseCount = turnRows.filter((row) => row.record_type === "phase").length;
@@ -470,6 +496,7 @@ function verifyState(agent?: string) {
           last_error: (expectedRuntime.last_error ?? null) !== (actualRuntime?.last_error ?? null),
           cooldown_until: (expectedRuntime.cooldown_until ?? null) !== (actualRuntime?.cooldown_until ?? null),
           last_message_id: (expectedRuntime.last_message_id ?? null) !== (actualRuntime?.last_message_id ?? null),
+          transition_hash: (expectedRuntime.transition_hash ?? null) !== (actualRuntime?.transition_hash ?? null),
         }
       : null;
     // Row-level action content drift (sample up to 10 recent rows when counts match)
@@ -563,11 +590,14 @@ function ensureSchema() {
     last_error TEXT,
     cooldown_until DATETIME,
     last_message_id INTEGER,
+    transition_hash TEXT,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
   const agentStateColumns = db.prepare("PRAGMA table_info(fleet_agent_state)").all() as Array<{ name: string }>;
   const hasHealthStatus = agentStateColumns.some((column) => column.name === "health_status");
   const hasHealthUpdatedAt = agentStateColumns.some((column) => column.name === "health_updated_at");
+  const hasTransitionHash = agentStateColumns.some((column) => column.name === "transition_hash");
+  if (!hasTransitionHash) db.run("ALTER TABLE fleet_agent_state ADD COLUMN transition_hash TEXT");
   if (!hasHealthStatus) db.run("ALTER TABLE fleet_agent_state ADD COLUMN health_status TEXT NOT NULL DEFAULT 'dead'");
   if (!hasHealthUpdatedAt) db.run("ALTER TABLE fleet_agent_state ADD COLUMN health_updated_at DATETIME");
   db.run(`CREATE TABLE IF NOT EXISTS fleet_agent_action_journal (
@@ -921,7 +951,7 @@ if (cmd === "get") {
     process.exit(64);
   }
   const previous = db.prepare(
-    "SELECT status, current_task, wake_reason, last_error, cooldown_until, last_message_id FROM fleet_agent_state WHERE agent_name = ? LIMIT 1",
+    "SELECT status, current_task, wake_reason, last_error, cooldown_until, last_message_id, transition_hash FROM fleet_agent_state WHERE agent_name = ? LIMIT 1",
   ).get(arg1) as RuntimeStateRow | null;
   try {
     validateRuntimeTransition(previous?.status ?? null, arg2);
@@ -937,9 +967,10 @@ if (cmd === "get") {
     nullableArg(Bun.argv[8]),
     nullableArg(Bun.argv[9]) ? Number(Bun.argv[9]) : null,
   );
+  const transitionHash = computeTransitionHash(arg1, previous, normalized);
   db.run(
-    `INSERT INTO fleet_agent_state (agent_name, status, current_task, wake_reason, last_error, cooldown_until, last_message_id, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `INSERT INTO fleet_agent_state (agent_name, status, current_task, wake_reason, last_error, cooldown_until, last_message_id, transition_hash, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
      ON CONFLICT(agent_name) DO UPDATE SET
        status = excluded.status,
        current_task = excluded.current_task,
@@ -947,6 +978,7 @@ if (cmd === "get") {
        last_error = excluded.last_error,
        cooldown_until = excluded.cooldown_until,
        last_message_id = excluded.last_message_id,
+       transition_hash = excluded.transition_hash,
        updated_at = CURRENT_TIMESTAMP`,
     [
       arg1,
@@ -956,6 +988,7 @@ if (cmd === "get") {
       normalized.last_error,
       normalized.cooldown_until,
       normalized.last_message_id,
+      transitionHash,
     ],
   );
   appendRuntimeArtifact(arg1, {
@@ -966,6 +999,7 @@ if (cmd === "get") {
     last_error: normalized.last_error,
     cooldown_until: normalized.cooldown_until,
     last_message_id: normalized.last_message_id,
+    transition_hash: transitionHash,
   });
 } else if (cmd === "health-set") {
   if (!arg1 || !arg2 || !isHealthStatus(arg2)) {
