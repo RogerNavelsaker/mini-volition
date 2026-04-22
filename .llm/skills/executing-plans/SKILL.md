@@ -13,15 +13,18 @@ Turn approved plans into commits. Combines trellis (state), seeds (issues), mulc
 - **Isolate**: Ensure you are in the plan's feature worktree.
 - **Run**:
     1. Mark active: `tl plan start <slug>`
-    2. Iterate:
+    2. Start workflow tracking: `ctx_workflow(action: "start", name: "<slug>")`
+    3. Iterate:
         - Edit
         - Build: `bun run scripts/build.ts`
         - Test: `bun test`
+        - Evidence: `ctx_workflow(action: "evidence_add", key: "step-<id>", value: "passed build/test")`
         - Commit: `git commit -m "<msg>"`
         - Record: `tl plan update <slug> --step-note "<step-id>: done"`
-    3. Complete: `tl plan complete <slug> --summary "<outcome>"`
-    4. Close: `sd close <issue-id>`
-    5. Unblock dependents: `sd unblock --all <issue-id>` (or per-dep: `sd unblock <dep-id> --from <issue-id>`)
+    4. Complete: `tl plan complete <slug> --summary "<outcome>"`
+    5. Finalize workflow: `ctx_workflow(action: "complete")`
+    6. Close: `sd close <issue-id>`
+    7. Unblock dependents: `sd unblock --all <issue-id>` (or per-dep: `sd unblock <dep-id> --from <issue-id>`)
 
 ## Rules
 - One commit per plan step. No squashing.

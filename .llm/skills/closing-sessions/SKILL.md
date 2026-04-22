@@ -37,7 +37,8 @@ Tier 1 Close:
 - [ ] 7. Close the issue:       sd close <issue-id>
 - [ ] 7a. Unblock dependents:  sd unblock --all <issue-id>
 - [ ] 8. Sync state dirs:       sd sync && ml sync && tl sync && cn sync && fx sync
-- [ ] 9. Retire the feature worktree:
+- [ ] 9. Save session:          ctx_session(action: "save")
+- [ ] 10. Retire the feature worktree:
          cd <main-worktree>
          git worktree remove worktrees/<slug>
          git branch -d <slug>           # -d only; never -D on unmerged work
@@ -123,4 +124,6 @@ If `--ff-only` fails, `main` diverged — investigate before forcing anything.
 
 - `tl handoff append <slug> --to <agent> --summary "current step N; next action; open questions"`.
 - `sd update <issue-id> --body "handoff to <agent>, branch <slug>"`.
+- `ctx_handoff(action: "create", paths: ["..."])` to share signatures of modified files.
+- `ctx_agent(action: "handoff", to_agent: "<agent>", message: "...")` for direct notification.
 - Do **not** merge to integration on behalf of an unfinished handoff. The receiving agent finishes the close.

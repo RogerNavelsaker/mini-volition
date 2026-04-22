@@ -33,8 +33,12 @@ The Flywheel is a learning system. Use this skill to transform tacit operational
 
 4. **Communicate**:
    - Broadcast the refinement:
-     ```
-     phloem send --to all --scope channel:general --body "Refined skill: <name>. Incorporating new consensus on <topic>."
+     ```typescript
+     ctx_agent({
+       action: "post",
+       category: "status",
+       message: "Refined skill: <name>. Incorporating new consensus on <topic>."
+     })
      ```
 
 ## Rules

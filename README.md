@@ -151,7 +151,6 @@ Provisioned via flox flakes. Available on the development path:
 - **`tl`** (trellis) -- specs, plans, handoffs under `./.trellis/`
 - **`cn`** (canopy) -- prompt management and sub-agent spawning under `./.canopy/`
 - **`fx`** (flox env) -- env manifest and lock under `./.flox/env/`
-- **`phloem`** -- minimal inter-agent message log under `./.phloem/` (source: `.llm/skills/coordinating-agents/`)
 - `git`, `gh`, `bun`, plus standard Linux (`diff`, `patch`, `grep`/`rg`, `find`, `jq`, `awk`, `sed`)
 
 ### Runtime binaries (produced by this repo, used at runtime by a running fleet)

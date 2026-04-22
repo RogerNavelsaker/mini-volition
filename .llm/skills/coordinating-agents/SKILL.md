@@ -1,6 +1,6 @@
 ---
 name: coordinating-agents
-description: Exchanges lightweight messages between dev agents (Claude Code, Gemini CLI, Codex CLI) using the phloem CLI plus existing seeds and trellis primitives. Use for cross-agent pings, review requests, status broadcasts, and issue-scoped chat — without involving GitHub or runtime binaries.
+description: Exchanges lightweight messages between dev agents (Claude Code, Gemini CLI, Codex CLI) using ctx_agent from the lean-ctx MCP server plus existing seeds and trellis primitives. Use for cross-agent pings, review requests, status broadcasts, and issue-scoped chat.
 ---
 
 # Coordinating agents
@@ -32,18 +32,22 @@ tl handoff list    --plan <slug>
 tl handoff latest  <slug>
 ```
 
-### 3. Phloem (free-form, non-issue-scoped)
+### 3. lean-ctx (free-form, non-issue-scoped)
 
 For pings, broadcasts, questions, or anything that doesn't belong on a specific issue:
 
-```
-phloem send   --to reviewer --scope plan:auth-refactor \
-              --body "ready for review on branch mv-auth-refactor"
-phloem inbox  --for reviewer --unacked
-phloem ack    <msg-id>
+```typescript
+ctx_agent({ 
+  action: "post", 
+  to_agent: "reviewer", 
+  category: "request", 
+  message: "plan:auth-refactor: ready for review on branch mv-auth-refactor" 
+})
+ctx_agent({ action: "read" }) // Inbox (unacked by default)
+ctx_agent({ action: "sync" }) // Full coordination overview
 ```
 
-Scopes are free-form strings. Suggested prefixes: `issue:<id>`, `plan:<slug>`, `channel:<name>`. Agents agree on conventions by using them.
+Categories for `post`: `finding`, `warning`, `request`, `status`.
 
 ## When to use which
 
@@ -51,61 +55,36 @@ Scopes are free-form strings. Suggested prefixes: `issue:<id>`, `plan:<slug>`, `
 |---|---|
 | Comment on a specific issue | Seeds (#1) |
 | Transfer control of a plan | Trellis (#2) |
-| "I'm working on X" / broadcast | Phloem `--to all` (#3) |
-| Review request outside any one issue | Phloem with `--scope plan:<slug>` (#3) |
+| "I'm working on X" / broadcast | lean-ctx `action: "post"` (#3) |
+| Review request outside any one issue | lean-ctx `action: "post"` (#3) |
 | Need human + CI in the loop | `gh pr create` (not this skill) |
 
-## Phloem reference
+## lean-ctx reference
 
-### Commands
+### ctx_agent Actions
 
-```
-phloem send  --to <agent> [--from <agent>] [--scope <s>] (--body "..." | --body-file <path|->)
-phloem inbox [--for <agent>] [--scope <s>] [--since <iso|epoch-ms>] [--unacked]
-phloem ack   <msg-id> [--by <agent>]
-```
+- `post`: Send a message. Use `to_agent` for direct, omit for broadcast.
+- `read`: Read incoming messages.
+- `sync`: Get a high-level overview of agent states, pending messages, and shared contexts.
+- `status`: Update your own status (`active` \| `idle` \| `finished`).
+- `diary`: Record durable learnings/decisions for other agents to recall later.
 
 ### Git-sharing
 
-To make phloem traffic travel with the repo, add:
+`lean-ctx` state is persisted across sessions via the MCP server and its backing store. It does not litter the repository with state files, keeping the workspace cleaner.
 
-```
-# .gitattributes
-.phloem/*.jsonl merge=union
-```
+## Identity
 
-To keep it purely local, add `.phloem/` to `.gitignore`. Either way, read messages via the CLI, not by opening the JSONL.
-
-### Build (bootstrap)
-
-`phloem` is produced from and lives inside this skill directory:
-
-- Source: `.llm/skills/coordinating-agents/main.ts` (+ `build.ts`)
-- Binary: `.llm/skills/coordinating-agents/bin/phloem`
-
-The flox environment's `on-activate` hook auto-builds `phloem` whenever the source is newer than the binary (or the binary is missing). The skill-local `bin/` is added to `PATH` via `[profile.common]`. No manual step is normally needed — just `flox activate`.
-
-If the auto-build fails (build output printed to stderr during activation), run manually:
-
-```
-bun run .llm/skills/coordinating-agents/build.ts
-```
-
-`.llm/skills/*/bin/` is gitignored, so the binary never lands in commits.
-
-### Identity
-
-Set a default agent name once per clone (or per worktree) so `--from`/`--for`/`--by` are auto-filled. Use `phloem` itself once it's built; do not hand-edit the config file.
+Agents are automatically registered when they join a session. Use `ctx_agent(action: "info")` to see your current ID and status.
 
 ## Rules
 
-- Phloem is a log, not a queue. Messages never disappear. Treat inbox as a view.
-- Acks are advisory — they signal "seen", not "done". Action lives in seeds/trellis.
+- The lean-ctx message bus is a log, not a queue. Treat `action: "read"` as your inbox view.
+- Category `status` is advisory — use it for acks or "seen" signals. Action still lives in seeds/trellis.
 - Do not put secrets or long content in messages. Reference commits, issues, or plans by id.
-- Phloem is for dev-agent coordination only. Runtime agent coordination uses `agent-mail` (a different tool inside the fleet product).
+- `ctx_agent` is for dev-agent coordination only. Runtime agent coordination uses `agent-mail` (a different tool inside the fleet product).
 
 ## Non-goals
 
-- No server. No daemon. No real-time push.
-- No schema for scopes — agents negotiate by usage.
 - No message editing or deletion. If you said it wrong, send a correction referencing the original id.
+- No real-time push. Agents poll via `read` or check `sync`.

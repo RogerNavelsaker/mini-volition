@@ -23,9 +23,13 @@ Operate "one layer up" by analyzing the work frontier. Don't just pick the first
      ```
 
 3. **Announce intent** (multi-agent only — skip in solo sessions):
-   - Use `phloem` to signal to other agents:
-     ```
-     phloem send --to all --scope issue:<id> --body "Starting work on high-leverage foundation (ranked top by sd triage)."
+   - Use `ctx_agent` to signal to other agents:
+     ```typescript
+     ctx_agent({
+       action: "post",
+       category: "status",
+       message: "Starting work on high-leverage foundation (ranked top by sd triage)."
+     })
      ```
 
 4. **After closing a task**, unblock its dependents:

@@ -5,7 +5,7 @@ description: Records durable knowledge — patterns, conventions, decisions, fai
 
 # Capturing knowledge
 
-Write facts that outlive the task. Primary tool: `ml`.
+Write facts that outlive the task. Primary tools: `ml` (mulch) and `ctx_knowledge` (lean-ctx).
 
 ## When to trigger
 
@@ -15,36 +15,35 @@ Write facts that outlive the task. Primary tool: `ml`.
 - An external reference (spec, dashboard, upstream doc) is now load-bearing for some code.
 - A pinned prompt revision in canopy materially changed a sub-agent's behavior.
 
-## When NOT to trigger
+## Recording
 
-- The fact is derivable from code or `git log`.
-- The fact is already in `docs/` or `AGENTS.md`.
-- It's ephemeral task state. Put it on the seeds issue with `sd update` instead.
-
-## Flow
+### 1. Persistent project knowledge (mulch)
+Use for durable, repo-wide facts.
 
 1. **Check for duplicates** — `ml search "<keywords>"`. Update an existing record rather than adding a near-duplicate; use `ml edit <domain> <id>` or `ml outcome <domain> <id>`.
-2. **Classify** — pick exactly one type (see below).
-3. **Record** — syntax depends on type (required fields differ). Include evidence where available:
+2. **Classify** — pick exactly one type: `pattern`, `convention`, `decision`, `failure`, `reference`, `guide`.
+3. **Record**:
    ```
-   ml record <domain> --type pattern     --name "..." --description "..." [--evidence-commit <sha>]
-   ml record <domain> --type convention  --description "..." [--files a.ts,b.ts]
-   ml record <domain> --type decision    --title "..." --rationale "..." [--relates-to <id>]
-   ml record <domain> --type failure     --description "..." --resolution "..." [--evidence-commit <sha>]
-   ml record <domain> --type reference   --name "..." --description "..."
-   ml record <domain> --type guide       --name "..." --description "..."
+   ml record <domain> --type <type> --name "..." --description "..." [--evidence-commit <sha>]
    ```
-4. **For prompt-revision decisions** — note the canopy prompt name in the rationale so `cn history <name>` stays linked.
 
-## Record types
+### 2. Fast knowledge capture (lean-ctx)
+Use for quick capture during a session or for facts that might be consolidated later.
 
-- **pattern** — a recurring design or code shape worth following. State shape + why.
-- **convention** — a repo-wide rule (naming, layout, style). State rule + scope.
-- **decision** — a choice between alternatives. Rationale required; note rejected options.
-- **failure** — a past bug, regression, or dead-end. Description + resolution required.
-- **reference** — pointer to external material. State locator + why it matters + which code depends on it.
-- **guide** — how-to / procedural note. Name + description.
+```typescript
+ctx_knowledge({
+  action: "remember",
+  category: "architecture" | "api" | "testing" | "deployment" | "conventions" | "dependencies",
+  key: "unique-key",
+  value: "The durable fact or pattern description",
+  confidence: 0.9
+})
+```
+- `action: "consolidate"`: Extract all findings from the current session.
+- `action: "gotcha"`: Record a bug/mistake and its trigger/resolution to never repeat it.
 
+## When NOT to trigger
+...
 ## Rules
 
 - Lead with the fact. Follow with *why* and *how to apply*.

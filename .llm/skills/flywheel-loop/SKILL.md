@@ -27,7 +27,7 @@ Select the highest-leverage "ready" task from the graph.
 ## 4. Coordinate
 Use **Coordinating Agents** primitives to prevent merge conflicts and align with other agents/operator.
 - **Goal**: prevent duplicate work, announce intent, and transfer control safely.
-- **Tool**: `coordinating-agents` (Skill), `phloem`, `sd update`, `tl handoff`.
+- **Tool**: `coordinating-agents` (Skill), `ctx_agent`, `sd update`, `tl handoff`.
 
 ## 5. Implement (Code Space)
 Implement and test locally.

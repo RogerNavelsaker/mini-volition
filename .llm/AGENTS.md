@@ -24,7 +24,7 @@ Local-first multi-agent runtime. Short CLI aliases own durable state; workflow-c
 ## Tool scope
 Dev agents (Claude Code, Gemini CLI, Codex CLI) may use:
 - `git`, `gh`
-- `tl`, `sd`, `ml`, `cn`, `phloem`
+- `tl`, `sd`, `ml`, `cn`
 - `bun` (build/test)
 - Standard Linux utilities
 
@@ -57,7 +57,7 @@ Each skill may use multiple tools (`sd`, `ml`, `tl`, `cn`, git, build).
 - `.llm/skills/scoping-changes/SKILL.md` — turn a request into issue + spec + plan + feature branch
 - `.llm/skills/executing-plans/SKILL.md` — drive a plan to completion with validation
 - `.llm/skills/reviewing-branches/SKILL.md` — peer review a feature branch before merge
-- `.llm/skills/coordinating-agents/SKILL.md` — lightweight messaging via seeds, trellis, and phloem
+- `.llm/skills/coordinating-agents/SKILL.md` — lightweight messaging via seeds, trellis, and lean-ctx
 - `.llm/skills/capturing-knowledge/SKILL.md` — record decisions, patterns, failures, references
 - `.llm/skills/delegating-subtasks/SKILL.md` — spawn sub-agents with pinned prompts
 - `.llm/skills/closing-sessions/SKILL.md` — tier-1 local merge or tier-2 PR, close issues, record learnings

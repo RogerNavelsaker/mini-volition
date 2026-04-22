@@ -3,14 +3,16 @@ name: scoping-changes
 description: Turn requests into tracked seeds issues, trellis specs, and plans. Use when requests are ambiguous, cross boundaries, or require multi-step planning.
 ---
 # Scoping changes
-Shape work before coding. Combines seeds (tasks), mulch (prior art), and trellis (specs/plans).
+Shape work before coding. Combines seeds (tasks), mulch (prior art), trellis (specs/plans), and lean-ctx (impact analysis).
 
 ## Workflow
-1. **Define**: Use `tl spec create` and `tl spec update` for architectural resolution. Search `ml` for prior decisions.
+1. **Analyze**: Use `ctx_architecture(action: "overview" | "layers" | "cycles")` to understand the structural context.
+2. **Impact**: Use `ctx_impact(action: "analyze", path: "...")` on files you intend to change to assess the blast radius.
+3. **Define**: Use `tl spec create` and `tl spec update` for architectural resolution. Search `ml` for prior decisions.
    - **No Verbatim Copies**: Specs must focus on technical approach/constraints/acceptance. Do not duplicate the issue's problem statement.
-2. **Track**: Use `sd create` for issues. Link using `sd dep add`.
+4. **Track**: Use `sd create` for issues. Link using `sd dep add`.
    - **Issues**: Focus strictly on the goal/problem.
-3. **Plan**: Use `tl plan create` for actionable steps (one logical change per commit).
+5. **Plan**: Use `tl plan create` for actionable steps (one logical change per commit).
    - **Plans**: Focus strictly on the execution steps and sequence.
 - **Isolate**: Initialize feature worktree: `git worktree add ../mv-<slug> -b <slug> integration`.
 - **Link**: Connect via `sd update <issue-id> --body "plan: <slug>, branch: <slug>, assignee: @<agent>"`.

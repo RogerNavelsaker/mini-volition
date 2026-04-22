@@ -8,5 +8,4 @@ zellij-*/
 bin/
 scratchpads/
 worktrees/
-.phloem/
 .llm/skills/*/bin/

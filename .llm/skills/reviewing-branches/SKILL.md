@@ -34,10 +34,10 @@ Branch Review (<slug>):
         git log --oneline integration..<slug>
         One commit per plan step; conventional prefixes; no `--amend` traces.
 - [ ] 3. Read the diff end-to-end:
-        git diff integration...<slug>
-        Or per-file:  git diff integration...<slug> -- <path>
+        - `ctx_read(path: "...", mode: "diff")` for each changed file to see the surgical impact.
+        - `ctx_impact(action: "analyze", path: "...")` on critical files to verify no regression in importers.
 - [ ] 4. Check scope discipline:
-        git diff integration...<slug> --stat
+        `git diff integration...<slug> --stat`
         Are touched files justified by the plan? Flag surprises.
 - [ ] 5. Cross-reference prior art:
         ml search "<keywords from diff>"            (any relevant decisions/failures?)
