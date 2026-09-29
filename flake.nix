@@ -110,7 +110,7 @@ EOF
           mkdir -p "$out"
         '';
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [ bun sqlite flox git ];
+          buildInputs = with pkgs; [ bun sqlite git ];
           shellHook = ''
             export META_REPO_ROOT=$(pwd)
             export PATH="$META_REPO_ROOT/bin:$PATH"

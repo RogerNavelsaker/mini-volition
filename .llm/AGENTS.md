@@ -8,7 +8,7 @@ Local-first multi-agent runtime. Short CLI aliases own durable state; workflow-c
 - `ml` = mulch, durable knowledge and decisions.
 - `cn` = canopy, pinned prompts.
 - `sd` = seeds, tasks and execution state.
-- `fx` = flox env state under `./.flox/env/`.
+- `devenv.yaml`, `devenv.nix`, and `devenv.lock` define this repo's development environment.
 
 ## Rules
 - Read this file first. For workflow detail, load the relevant `.llm/skills/<workflow>/SKILL.md`.

@@ -45,7 +45,7 @@ Tier 1 Close:
 ```
 
 `tl sync` stages and commits any pending `.trellis/` changes with a generated body listing what moved — use it rather than `git add .trellis/` to keep the message consistent.
-`fx sync` stages and commits `.flox/env/manifest.toml` and `.flox/env/manifest.lock` as `chore: sync flox env`.
+After changing the development tool inputs, run `devenv update`, review `devenv.lock`, and include the lockfile in the dependency-change commit.
 
 ### Branch-divergence conflicts (tier 1)
 

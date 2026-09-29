@@ -81,9 +81,9 @@ const rerankSocket = join(runtimeDir, "rerank.sock");
 const lightSocket = join(runtimeDir, "light.sock");
 const heavySocket = join(runtimeDir, "heavy.sock");
 
-const claudeBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/cc";
-const geminiBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/gmi";
-const codexBin = "/home/rona/.flox/run/x86_64-linux.default.run/bin/cod";
+const claudeBin = process.env.FLEET_CLAUDE_BIN || "cc";
+const geminiBin = process.env.FLEET_GEMINI_BIN || "gemini";
+const codexBin = process.env.FLEET_CODEX_BIN || "cod";
 
 const mailBin = join(binDir, "agent-mail");
 const harnessBin = join(binDir, "agent-runtime");
@@ -333,6 +333,11 @@ function isExecutable(path: string): boolean {
   }
 }
 
+function isCommandAvailable(command: string): boolean {
+  if (command.includes("/")) return isExecutable(command);
+  return spawnSync(["which", command]).exitCode === 0;
+}
+
 type SocketHeartbeat = {
   ok: true;
   type: "heartbeat";
@@ -469,9 +474,9 @@ function ensureStateDir() {
 
 function verifyAgentBins(): boolean {
   let ok = true;
-  for (const path of [claudeBin, geminiBin, codexBin]) {
-    if (!isExecutable(path)) {
-      console.error(`missing agent binary: ${path}`);
+  for (const command of [claudeBin, geminiBin, codexBin]) {
+    if (!isCommandAvailable(command)) {
+      console.error(`missing agent binary: ${command}`);
       ok = false;
     }
   }
@@ -803,9 +808,9 @@ async function showStatus() {
   console.log(`inference-local-rerank-bin: ${isExecutable(rerankBin) ? "ready" : "missing"} ${rerankBin}`);
   console.log(`inference-local-small-bin: ${isExecutable(lightBin) ? "ready" : "missing"} ${lightBin}`);
   console.log(`inference-local-medium-bin: ${isExecutable(heavyBin) ? "ready" : "missing"} ${heavyBin}`);
-  console.log(`claude-bin: ${isExecutable(claudeBin) ? "ready" : "missing"} ${claudeBin}`);
-  console.log(`gemini-bin: ${isExecutable(geminiBin) ? "ready" : "missing"} ${geminiBin}`);
-  console.log(`codex-bin: ${isExecutable(codexBin) ? "ready" : "missing"} ${codexBin}`);
+  console.log(`claude-bin: ${isCommandAvailable(claudeBin) ? "ready" : "missing"} ${claudeBin}`);
+  console.log(`gemini-bin: ${isCommandAvailable(geminiBin) ? "ready" : "missing"} ${geminiBin}`);
+  console.log(`codex-bin: ${isCommandAvailable(codexBin) ? "ready" : "missing"} ${codexBin}`);
   console.log(`agent-mail-db: ${mailDb}`);
   console.log(`agent-jobs-db: ${jobsDb}`);
   console.log(`agent-memory-db: ${memoryDb}`);

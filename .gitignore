@@ -4,6 +4,8 @@ build/
 dist/
 lib/onnxruntime/
 node_modules/
+.devenv/
+devenv.local.nix
 zellij-*/
 bin/
 scratchpads/

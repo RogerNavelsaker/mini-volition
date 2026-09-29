@@ -1,17 +1,24 @@
-# §Architecture
-Fleet architecture: hotpath (SQLite) + durable (JSONL/TOML).
-
-## §Components
-- **τHarness**: Execution loop, wake selection, context assembly, recovery.
-- **τThinker**: ACP cloud agents (Gemini/Claude/OpenAI).
-- **τScribe**: Local model offload (light/heavy).
-- **τMuscle**: Inference workers.
-- **τLibrarian**: Async upkeep (compaction, entity extraction).
-
-## §Durability
-- **Transport**: `agent-mail.db` + `state/mail/`
-- **Jobs**: `agent-jobs.db` + `state/jobs/`
-- **State**: `agent-state.db` + `state/runtime/`
-- **Governance**: `fleet.db` + `state/fleet/`
-- **Scratchpad**: `agent-state.db` (Table: `agent_scratchpads`) + `state/scratchpads/<agent>.jsonl`
-- **Config**: `config.db` (Table: `fleet_configs`) + `config/fleet.toml` (canonical)
+Fleet: SQLite WAL hotpath + JSONL canonical log + SQLite projection.
+- **τHarness**: Wake select → ctx assemble → validate → dispatch → recover.
+- **τReplicant**: Persistent ACP cloud actor; durable identity + memory.
+- **τWorker**: Temporary non-replicant offload; bounded analysis/validation/research/planning/review.
+- **τScribe**: Current local offload path; current surface → `worker invoke`.
+- **τMuscle**: Embed/rerank/light/medium inference workers.
+- **τLibrarian**: Memory upkeep; compaction/extraction/retention.
+- **τDigest/Ear**: Ambient chat → social digest → wake ctx.
+- **τConversationReporter**: Shared gossip/conversation reporter; creates prepared digest/report/summary records for turn context assembly.
+- **τDreaming**: Background memory consolidation and upkeep; extraction, repair, compaction, clean-index.
+- **τOperatorConsole**: Human control plane; status/chat/mail/logs/escalation.
+- **Mail**: `replicant-mail.db` → `state/mail/`.
+- **Jobs**: `replicant-scheduler.db` → `state/jobs/`.
+- **RuntimeState**: `replicant-state.db` → `state/runtime/`.
+- **Memory**: `replicant-memory.db` → durable memory artifacts/state.
+- **Fleet**: `fleet.db` → `state/fleet/`.
+- **Clipboard**: `replicant_clipboards` → `state/clipboard/<replicant>.jsonl`.
+- **Cfg**: `fleet_configs` → `config/fleet.toml`.
+- **∂HarnessBoundary**: Replicant intent → harness validate/execute/normalize/record.
+- **∂SubstrateBoundary**: FS/process/network/tool policy enforced below prompt.
+- **MemoryFirst**: `memory recall` before broad shell/file/web/artifact exploration when plausible.
+- **Machete**: Large output → bounded ctx + explicit truncation/evidence.
+- **ToolFamilies**: `replicant-tool` dispatcher with `memory|clipboard|todo|mail|chat|human|worker|replicant|shell|file|web` subcommands.
+- **Envelope**: `replicant-tool <subcommand> <jsonl>`; shared result envelope.

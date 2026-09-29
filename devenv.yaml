@@ -1,0 +1,15 @@
+inputs:
+  nixpkgs:
+    url: github:cachix/devenv-nixpkgs/rolling
+  seeds:
+    url: github:RogerNavelsaker/nixpkg-seeds
+  mulch:
+    url: github:RogerNavelsaker/nixpkg-mulch
+  canopy:
+    url: github:RogerNavelsaker/nixpkg-canopy
+  trellis:
+    url: github:RogerNavelsaker/nixpkg-trellis
+  claude-code:
+    url: github:RogerNavelsaker/nixpkg-claude-code
+  codex:
+    url: github:RogerNavelsaker/nixpkg-codex

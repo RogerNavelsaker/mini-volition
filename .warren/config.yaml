@@ -1,0 +1,6 @@
+defaultRole: pi
+defaultProvider: openrouter
+defaultModel: openai/gpt-5.6-luna
+defaultBranch: main
+runBranchPrefix: warren
+agentImage: ghcr.io/nacosolutions/senshac-warren-agent@sha256:5f44b7bf1747f12ff3db2397c276f1015b41878b2283b536ee15830f453a3fec

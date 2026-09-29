@@ -1,23 +1,29 @@
-# §CoreArchitecture
-
-Modular, local-first runtime. SQLite-backed transport/state. Socket-based inference workers.
-
-## §Roles
-- **τBody(agent-runtime)**: Owns exec loop, wake selection, context assembly, transport dispatch, recovery.
-- **τThinker**: ACP-driven cloud agents. Profile: `light|full|max`.
-- **τScribe**: Ephemeral local model offload (light/heavy). Action: `spawn_scribe` → mail.
-- **τMuscle**: Inference workers (`embed.sock`, `rerank.sock`, `light.sock`, `heavy.sock`).
-- **τLibrarian**: Async upkeep (compaction, entity extraction).
-
-## §Communication & Durability
-SQLite-backed (hotpath) + JSONL (durable record).
-- **Transport**: `agent-mail.db` + `state/mail/`
-- **Jobs**: `agent-jobs.db` + `state/jobs/`
-- **State**: `agent-state.db` + `state/runtime/`
-- **Governance**: `fleet.db` + `state/fleet/`
-- **Scratchpad**: `agent-state.db` (Table: `agent_scratchpads`) + `state/scratchpads/<agent>.jsonl`
-- **Config**: `config.db` (Table: `fleet_configs`) + `config/fleet.toml` (canonical)
-
-## §Orientation
-- **→Target**: Inject §IDENTITY, §ORIENTATION, §SCRATCHPAD, §MEMORY, §TIMELINE on wake.
-- **τSubscriptions**: Dynamic transport channel monitoring.
+Modular local-first runtime; SQLite WAL transport/state; JSONL canonical log; SQLite projection; socket inference workers.
+- **τBody(replicant-runtime)**: exec loop; wake select; ctx assemble; transport dispatch; recovery.
+- **τReplicant**: persistent ACP cloud actor; profile `light|full|max`.
+- **τWorker**: temporary offload actor; res → mail/ctx; invocation-scoped identity.
+- **τScribe**: current local/offload worker via `spawn_scribe`; current surface → `worker invoke`.
+- **τMuscle**: `embed.sock|rerank.sock|light.sock|heavy.sock`.
+- **τLibrarian**: compaction; extraction; memory maintenance.
+- **τDigest/Ear**: ambient social digest → wake ctx.
+- **τConversationReporter**: shared gossip/conversation reporting → prepared digest/report/summary memory for turn context assembly.
+- **τDreaming**: background memory upkeep and consolidation → extraction/repair/compaction/clean-index.
+- **Hotpath**: SQLite WAL.
+- **Canonical**: append-only JSONL/TOML.
+- **Projection**: SQLite materialized view of the canonical log.
+- **Mail**: `replicant-mail.db` → `state/mail/`.
+- **Jobs**: `replicant-scheduler.db` → `state/jobs/`.
+- **RuntimeState**: `replicant-state.db` → `state/runtime/`.
+- **Fleet**: `fleet.db` → `state/fleet/`.
+- **Clipboard**: `replicant_clipboards` → `state/clipboard/<replicant>.jsonl`.
+- **Cfg**: `fleet_configs` → `config/fleet.toml`.
+- **Identity**: durable id/class/profile/mission/canonical id.
+- **Orientation**: sleep delta/current datetime/wake reason/digest.
+- **Clipboard**: full persistent clipboard; current impl storage/action name: `scratchpad`.
+- **Memory**: selected WM/LTM; deliberate lookup via `memory recall`.
+- **Todos**: due-now/overdue injection; broader view via `todo list`.
+- **Events**: current burst/event remains primary interpretation target.
+- **Intent**: replicant chooses plain domain tools.
+- **Validation**: harness validates/executes/normalizes/records.
+- **Substrate**: FS/process/network/remote policy below prompt.
+- **OutputBounds**: truncation appears as explicit evidence.

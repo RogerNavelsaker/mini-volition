@@ -144,13 +144,12 @@ Key env vars (all have defaults):
 Two distinct tool surfaces — do not confuse them:
 
 ### Dev tools (used to build and evolve this repo)
-Provisioned via flox flakes. Available on the development path:
+Provisioned by the project devenv environment (`devenv shell`). Available on the development path:
 
 - **`sd`** (seeds) -- issue tracker under `./.seeds/`
 - **`ml`** (mulch) -- durable knowledge records under `./.mulch/`
 - **`tl`** (trellis) -- specs, plans, handoffs under `./.trellis/`
 - **`cn`** (canopy) -- prompt management and sub-agent spawning under `./.canopy/`
-- **`fx`** (flox env) -- env manifest and lock under `./.flox/env/`
 - `git`, `gh`, `bun`, plus standard Linux (`diff`, `patch`, `grep`/`rg`, `find`, `jq`, `awk`, `sed`)
 
 ### Runtime binaries (produced by this repo, used at runtime by a running fleet)
