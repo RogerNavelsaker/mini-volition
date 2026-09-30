@@ -1,0 +1,47 @@
+# .warren/triggers.yaml — scheduled automated runs for this project
+
+- id: nightwatch-patrol
+  kind: cron
+  cron: '0 2 * * 0'          # weekly, Sunday 02:00
+  role: nightwatch
+  timezone: UTC
+  prompt: |
+    Scan this repo for quality issues. Follow your procedure exactly.
+    Today's date is {{date}}. If you find issues, file a plan. If the
+    codebase is clean, report clean and exit.
+
+- id: bugwatch-patrol
+  kind: cron
+  cron: '0 3 * * 1'          # weekly, Monday 03:00
+  role: bugwatch
+  timezone: UTC
+  prompt: |
+    Read the open bug queue, investigate each, and produce a plan per bug.
+    Today's date is {{date}}. Cap at 3 qualifying bugs.
+
+- id: gatewatch-patrol
+  kind: cron
+  cron: '0 4 * * *'          # daily, 04:00
+  role: gatewatch
+  timezone: UTC
+  prompt: |
+    Audit merged commit history over the last 36 hours for gate integrity,
+    honest diffs, red-gate rationalizations, and ratchet exceptions.
+
+- id: ratchetwatch-patrol
+  kind: cron
+  cron: '0 5 * * *'          # daily, 05:00
+  role: ratchetwatch
+  timezone: UTC
+  prompt: |
+    Measure quality ratchet slack (coverage floors, file-size grandfathers,
+    bundle creep) and plan mechanical tightenings.
+
+- id: tastewatch-sample
+  kind: cron
+  cron: '0 6 * * 0'          # weekly, Sunday 06:00
+  role: tastewatch
+  timezone: UTC
+  prompt: |
+    Sample merged work from the past 7 days against docs/CONSTITUTION.md
+    and compile a concise digest seed.
