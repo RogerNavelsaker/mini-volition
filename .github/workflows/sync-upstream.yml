@@ -1,0 +1,36 @@
+name: Sync Upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Standardized Sync
+        run: |
+          if [ -f "./update.sh" ]; then
+            chmod +x ./update.sh && ./update.sh
+          elif [ -f "package.json" ] && grep -q '"sync:source"' package.json; then
+            nix shell nixpkgs#bun -c sh -c 'bun run sync:source'
+          elif [ -f "scripts/sync-from-github.sh" ]; then
+            bash scripts/sync-from-github.sh
+          elif [ -f "scripts/sync-from-upstream.sh" ]; then
+            bash scripts/sync-from-upstream.sh
+          else
+            nix run nixpkgs#nix-update -- --flake default
+          fi
+
+      - name: Automatic sync
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update sync mechanism to fix upstream updates"
