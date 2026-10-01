@@ -2,7 +2,7 @@
 
 - id: nightwatch-patrol
   kind: cron
-  cron: '0 2 * * 0'          # weekly, Sunday 02:00
+  cron: '3 2 * * 0' # minute 03, staggered by project
   role: nightwatch
   timezone: UTC
   prompt: |
@@ -12,7 +12,7 @@
 
 - id: bugwatch-patrol
   kind: cron
-  cron: '0 3 * * 1'          # weekly, Monday 03:00
+  cron: '3 3 * * 1' # minute 03, staggered by project
   role: bugwatch
   timezone: UTC
   prompt: |
@@ -21,7 +21,7 @@
 
 - id: gatewatch-patrol
   kind: cron
-  cron: '0 4 * * *'          # daily, 04:00
+  cron: '3 4 * * *' # minute 03, staggered by project
   role: gatewatch
   timezone: UTC
   prompt: |
@@ -30,7 +30,7 @@
 
 - id: ratchetwatch-patrol
   kind: cron
-  cron: '0 5 * * *'          # daily, 05:00
+  cron: '3 5 * * *' # minute 03, staggered by project
   role: ratchetwatch
   timezone: UTC
   prompt: |
@@ -39,7 +39,7 @@
 
 - id: tastewatch-sample
   kind: cron
-  cron: '0 6 * * 0'          # weekly, Sunday 06:00
+  cron: '3 6 * * 0' # minute 03, staggered by project
   role: tastewatch
   timezone: UTC
   prompt: |
