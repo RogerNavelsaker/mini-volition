@@ -22,6 +22,8 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run scripts/build.ts
+          # Flake sources are derived from Git; include generated artifacts in the index.
+          git add -f bin lib/onnxruntime
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
