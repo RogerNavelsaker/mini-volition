@@ -1,6 +1,4 @@
 defaultRole: pi
-defaultProvider: openrouter
-defaultModel: openai/gpt-5.6-luna:floor:low
 defaultBranch: main
 runBranchPrefix: warren
 agentImage: ghcr.io/rogernavelsaker/warren-agent:latest
