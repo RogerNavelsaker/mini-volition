@@ -21,7 +21,8 @@ jobs:
       - name: Build runtime artifacts
         run: |
           bun install --frozen-lockfile
-          bun run scripts/build.ts
+          bun run build
+          test -x bin/fleet
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
