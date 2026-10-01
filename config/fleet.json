@@ -1,0 +1,7 @@
+{
+  "agents": [
+    { "name": "claude", "model": "claude-sonnet-4-20250514", "socket": "claude.sock" },
+    { "name": "gemini", "model": "gemini-2.5-pro", "socket": "gemini.sock" },
+    { "name": "codex", "model": "o3", "socket": "openai.sock" }
+  ]
+}
