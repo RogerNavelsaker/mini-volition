@@ -1,7 +1,6 @@
 defaultRole: pi
 defaultBranch: main
 runBranchPrefix: warren
-agentImage: ghcr.io/rogernavelsaker/warren-agent:latest
 
 ciFixer:
   enabled: true
