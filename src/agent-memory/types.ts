@@ -94,10 +94,6 @@ export type ExtractEntitiesResponse = {
   source: string;
 };
 
-export type HydeResponse = {
-  hypothesis: string;
-  source: string;
-};
 
 export type DecomposeKeywordsResponse = {
   high_level: string[];

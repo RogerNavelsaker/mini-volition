@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { spawn } from "bun";
-import { execFileSync, execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { createHash } from "crypto";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { createConnection } from "net";
@@ -834,6 +834,7 @@ function parseActionEnvelope(raw: string): unknown | null {
     try {
       const parsed = JSON.parse(candidate);
       if (parsed && typeof parsed === "object") return parsed;
+      // eslint-disable-next-line no-empty
     } catch {}
   }
 
@@ -1128,6 +1129,7 @@ function requestInferenceEmbed(text: string): Promise<number[] | null> {
       clearTimeout(timer);
       try {
         socket.end();
+      // eslint-disable-next-line no-empty
       } catch {}
       resolve(value);
     };
@@ -1163,6 +1165,7 @@ function requestInferenceRetrievalMode(source: WakeSource, burst: IncomingBurst)
       clearTimeout(timer);
       try {
         socket.end();
+      // eslint-disable-next-line no-empty
       } catch {}
       resolve(value);
     };
@@ -1233,6 +1236,7 @@ function requestInferenceTurnProfile(source: WakeSource, burst: IncomingBurst): 
       clearTimeout(timer);
       try {
         socket.end();
+      // eslint-disable-next-line no-empty
       } catch {}
       resolve(value);
     };
@@ -1273,6 +1277,7 @@ function requestScribe(scribeName: string, task: string): Promise<string | null>
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // eslint-disable-next-line no-empty
       try { socket.end(); } catch {}
       resolve(value);
     };
@@ -1322,6 +1327,7 @@ function requestProviderTurn(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // eslint-disable-next-line no-empty
       try { socket.end(); } catch {}
       resolve(value);
     };
@@ -1546,17 +1552,6 @@ function summarizeWakeCandidate(candidate: WakeCandidate, index: number): string
   ].join(" | ");
 }
 
-function renderWakeChoicePrompt(candidates: WakeCandidate[]): string {
-  return [
-    "Choose the next wake to handle.",
-    "Return strict JSON only: {\"id\": <candidate id>, \"reason\": \"<short reason>\"}.",
-    "Prefer urgent/direct work when needed, but you may defer noisy or low-leverage work.",
-    "",
-    "Candidates:",
-    ...candidates.map((candidate, index) => summarizeWakeCandidate(candidate, index + 1)),
-  ].join("\n");
-}
-
 function parseWakeChoice(raw: string, candidates: WakeCandidate[]): WakeCandidate | null {
   const parsed = parseActionEnvelope(raw);
   if (!parsed || typeof parsed !== "object") return null;
@@ -1619,6 +1614,7 @@ function requestInferenceWakeChoice(candidates: WakeCandidate[]): Promise<WakeCa
       clearTimeout(timer);
       try {
         socket.end();
+      // eslint-disable-next-line no-empty
       } catch {}
       resolve(value);
     };
@@ -2345,6 +2341,7 @@ async function processWakeEvent(
         deadmanReason = `turn timed out after ${executionProfile.timeout_ms}ms`;
         diagnosticBuffer += `[DEADMAN] ${deadmanReason}\n`;
         resolvePendingAcpError(deadmanReason);
+      // eslint-disable-next-line no-empty
         try { agent.kill(); } catch {}
       }, executionProfile.timeout_ms);
 
@@ -2356,6 +2353,7 @@ async function processWakeEvent(
         liveLimitState = state;
         liveLimitInfo = extractLimitInfo(diagnosticBuffer);
         resolveLimitSignal?.({ state: liveLimitState, info: liveLimitInfo });
+      // eslint-disable-next-line no-empty
         try { agent.kill(); } catch {}
       };
 
@@ -2447,6 +2445,7 @@ async function processWakeEvent(
         diagnosticBuffer += "ACP session/new did not return a sessionId.\n";
       }
 
+      // eslint-disable-next-line no-empty
       try { agent.kill(); } catch {}
       const exitCode = await agent.exited;
       await Promise.all([stdoutReader, stderrReader]);

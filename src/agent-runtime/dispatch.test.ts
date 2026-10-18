@@ -128,12 +128,11 @@ describe("runDispatchLoop", () => {
   });
 
   test("processWake errors are also caught and counted", async () => {
-    let iters = 0;
     const result = await runDispatchLoop(
       {
         selectWake: async () => "wake",
         processWake: async () => { throw new Error("process-error"); },
-        shouldContinue: () => { iters++; return true; },
+        shouldContinue: () => { return true; },
       },
       {
         maxConsecutiveErrors: 3,
@@ -165,9 +164,6 @@ describe("runDispatchLoop", () => {
   });
 
   test("backoff grows up to maxBackoffMs", async () => {
-    const delays: number[] = [];
-    const origSetTimeout = global.setTimeout;
-    let attempt = 0;
     const result = await runDispatchLoop(
       {
         selectWake: async () => { throw new Error("err"); },

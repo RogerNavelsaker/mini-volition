@@ -40,6 +40,7 @@ function insertFact(
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(agentName, itemId, subject, predicate, object, evidence, validTo);
   return Number(result.lastInsertRowid);
+      // eslint-disable-next-line no-empty
 }
 
 describe("findConflictingFacts", () => {

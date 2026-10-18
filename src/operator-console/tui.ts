@@ -117,7 +117,7 @@ export function reduceTuiState(state: OperatorTuiState, action: TuiAction, snaps
     return [{ ...state, flash: action.message }, { type: "none" }];
   }
 
-  let next = clearFlash(state);
+  const next = clearFlash(state);
   const key = action.sequence;
   const lower = key.toLowerCase();
 

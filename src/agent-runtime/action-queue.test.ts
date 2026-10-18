@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { executeActionQueue, loadCompletedActionIndexes, HaltError, type ActionRecord, type ActionQueueCallbacks } from "./action-queue";
+import { executeActionQueue, loadCompletedActionIndexes, type ActionRecord, type ActionQueueCallbacks } from "./action-queue";
 
 function makeCallbacks(overrides: Partial<ActionQueueCallbacks> = {}): ActionQueueCallbacks & { journal: jest.Mock; log: jest.Mock } {
   const journaled: Array<[string, number, string, string | null]> = [];

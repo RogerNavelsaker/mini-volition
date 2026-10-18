@@ -15,6 +15,7 @@ function makeDb(): Database {
 }
 
 function insertCompactionItem(db: Database, agentName: string): number {
+      // eslint-disable-next-line no-empty
   const cid = Number(db.prepare(
     `INSERT INTO agent_memory_compactions (agent_name, source_artifact_ids, signature, summary)
      VALUES (?, '[]', 'sig-' || RANDOM(), 'test')`,

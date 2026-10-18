@@ -210,6 +210,7 @@ function terminusSession() {
     for (const f of [base, `${base}-wal`, `${base}-shm`]) {
       try {
         if (accessSafe(f)) unlinkSync(f);
+      // eslint-disable-next-line no-empty
       } catch {}
     }
   }
@@ -218,6 +219,7 @@ function terminusSession() {
                      join(runtimeDir, "openai.sock"), join(runtimeDir, "openrouter.sock")]) {
     try {
       if (accessSafe(sock)) unlinkSync(sock);
+      // eslint-disable-next-line no-empty
     } catch {}
   }
   console.log("Terminus complete. Databases and sockets removed.");
@@ -373,6 +375,7 @@ function requestSocketHeartbeat(socketPath: string, timeoutMs = 750): Promise<So
       clearTimeout(timer);
       try {
         socket.end();
+      // eslint-disable-next-line no-empty
       } catch {}
       resolve(value);
     };
@@ -390,6 +393,7 @@ function requestSocketHeartbeat(socketPath: string, timeoutMs = 750): Promise<So
           finish(parsed as SocketHeartbeat);
           return;
         }
+      // eslint-disable-next-line no-empty
       } catch {}
       finish(null);
     });
@@ -438,6 +442,7 @@ function serviceState(service: ServiceDefinition) {
   if (!running && existsSync(pidPath(service.name))) {
     try {
       unlinkSync(pidPath(service.name));
+      // eslint-disable-next-line no-empty
     } catch {}
   }
   return { pid, running };
@@ -756,6 +761,7 @@ function stopSession() {
       if (existsSync(pidPath(service.name))) {
         try {
           unlinkSync(pidPath(service.name));
+      // eslint-disable-next-line no-empty
         } catch {}
       }
       continue;
@@ -763,6 +769,7 @@ function stopSession() {
     try {
       process.kill(pid!, "SIGTERM");
       stopped.push(service.name);
+      // eslint-disable-next-line no-empty
     } catch {}
   }
   Bun.sleepSync(300);
@@ -772,16 +779,19 @@ function stopSession() {
       if (existsSync(pidPath(service.name))) {
         try {
           unlinkSync(pidPath(service.name));
+      // eslint-disable-next-line no-empty
         } catch {}
       }
       continue;
     }
     try {
       process.kill(pid!, "SIGKILL");
+      // eslint-disable-next-line no-empty
     } catch {}
     if (existsSync(pidPath(service.name))) {
       try {
         unlinkSync(pidPath(service.name));
+      // eslint-disable-next-line no-empty
       } catch {}
     }
   }

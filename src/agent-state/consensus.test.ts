@@ -26,7 +26,7 @@ describe("Agent State Consensus", () => {
     resetTempDir();
     const proposal = JSON.parse(
       execSync(
-        `AGENT_STATE_DB=${dbPath} META_REPO_ROOT=${tempDir} bun run src/agent-state/main.ts proposal-create claude adopt-safety-rail \"Require consensus before enabling auto-merge\" unanimity open`,
+        `AGENT_STATE_DB=${dbPath} META_REPO_ROOT=${tempDir} bun run src/agent-state/main.ts proposal-create claude adopt-safety-rail "Require consensus before enabling auto-merge" unanimity open`,
       ).toString("utf-8"),
     ) as { id: number; proposer_agent: string; strategy: string; status: string };
 
@@ -36,7 +36,7 @@ describe("Agent State Consensus", () => {
 
     const vote = JSON.parse(
       execSync(
-        `AGENT_STATE_DB=${dbPath} META_REPO_ROOT=${tempDir} bun run src/agent-state/main.ts vote-cast ${proposal.id} codex approve \"safe default\"`,
+        `AGENT_STATE_DB=${dbPath} META_REPO_ROOT=${tempDir} bun run src/agent-state/main.ts vote-cast ${proposal.id} codex approve "safe default"`,
       ).toString("utf-8"),
     ) as { proposal_id: number; voter_agent: string; vote: string };
 

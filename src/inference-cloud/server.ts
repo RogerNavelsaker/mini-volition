@@ -40,6 +40,7 @@ export type ProviderHandler = (request: TurnRequest) => Promise<TurnResponse>;
 export function startProviderServer(socketPath: string, handler: ProviderHandler, label: string) {
   try {
     unlinkSync(socketPath);
+      // eslint-disable-next-line no-empty
   } catch {}
 
   const server = createServer((connection: Socket) => {

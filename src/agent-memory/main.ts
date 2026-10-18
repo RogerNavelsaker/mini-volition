@@ -19,7 +19,6 @@ import type {
   DecomposeKeywordsResponse,
   EmbedResponse,
   ExtractEntitiesResponse,
-  HydeResponse,
   LinkedLookupRow,
   MemoryKind,
   RecentInvalidationRow,
@@ -160,6 +159,7 @@ function requestEmbed(texts: string[]): Promise<EmbedResponse> {
       clearTimeout(timer);
       try {
         socket.end();
+      // eslint-disable-next-line no-empty
       } catch {}
       fn();
     };
@@ -201,6 +201,7 @@ function requestRerank(query: string, passages: string[]): Promise<RerankResult[
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // eslint-disable-next-line no-empty
       try { socket.end(); } catch {}
       resolve(value);
     };
@@ -234,6 +235,7 @@ function requestExtractEntities(text: string): Promise<ExtractEntitiesResponse |
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // eslint-disable-next-line no-empty
       try { socket.end(); } catch {}
       resolve(value);
     };
@@ -265,6 +267,7 @@ function requestHyde(query: string): Promise<string | null> {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // eslint-disable-next-line no-empty
       try { socket.end(); } catch {}
       resolve(value);
     };
@@ -298,6 +301,7 @@ function requestDecomposeKeywords(text: string): Promise<DecomposeKeywordsRespon
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // eslint-disable-next-line no-empty
       try { socket.end(); } catch {}
       resolve(value);
     };
@@ -390,6 +394,7 @@ function requestCompact(entries: string[], goal: string): Promise<CompactRespons
       clearTimeout(timer);
       try {
         socket.end();
+      // eslint-disable-next-line no-empty
       } catch {}
       fn();
     };
@@ -937,6 +942,7 @@ async function compact(agentName: string) {
             upsertSearchIndex("link", linkRow.id, agentName, "archival", le.evidence, linkEmbed.embeddings[i] ?? []);
           }
         }
+      // eslint-disable-next-line no-empty
       } catch {}
     }
       // Extract entities via LLM (inference-local-medium), fall back to regex deriveFacts
@@ -1198,8 +1204,8 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
      LIMIT 30`,
   ).all(query) as Array<{ id: number; score: number }>;
   // Dual keyword decomposition: extra FTS passes on HL/LL keywords when available
-  let hlFtsRows: Array<{ id: number; score: number }> = [];
-  let llFtsRows: Array<{ id: number; score: number }> = [];
+  const hlFtsRows: Array<{ id: number; score: number }> = [];
+  const llFtsRows: Array<{ id: number; score: number }> = [];
   const decomposed = await requestDecomposeKeywords(query);
   if (decomposed) {
     for (const kw of decomposed.high_level.slice(0, 4)) {
@@ -1211,6 +1217,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
            LIMIT 10`,
         ).all(kw) as Array<{ id: number; score: number }>;
         hlFtsRows.push(...rows);
+      // eslint-disable-next-line no-empty
       } catch {}
     }
     for (const kw of decomposed.low_level.slice(0, 4)) {
@@ -1222,6 +1229,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
            LIMIT 10`,
         ).all(kw) as Array<{ id: number; score: number }>;
         llFtsRows.push(...rows);
+      // eslint-disable-next-line no-empty
       } catch {}
     }
   }
@@ -1252,6 +1260,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
       .filter((row) => row.score > 0)
       .sort((left, right) => right.score - left.score)
       .slice(0, 30);
+      // eslint-disable-next-line no-empty
   } catch {}
 
   const fused = new Map<number, { score: number; topBonus: number }>();
@@ -1359,6 +1368,7 @@ async function lookup(agentName: string, query: string, limit = 3, mode: Retriev
         const remainder = ranked.filter((row) => !rerankedSet.has(row.id));
         finalRanked = [...rerankedRows, ...remainder];
       }
+      // eslint-disable-next-line no-empty
     } catch {}
   }
 

@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { buildBurstFromPrimary, claimBurst, completeBurst, countUnread, ensureMailSchema, peekBurst, reclaimStaleClaims, releaseClaims, type BurstEnvelope, type FleetMessage, type MailFilter, unreadQueryFor } from "./core";
+import { claimBurst, completeBurst, ensureMailSchema, peekBurst, reclaimStaleClaims, releaseClaims, type FleetMessage, type MailFilter } from "./core";
 import { appendMailArtifact } from "../state-artifacts/lib";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
@@ -373,6 +373,7 @@ if (cmd === "send") {
       process.exit(0);
     }
 
+      // eslint-disable-next-line no-empty
     await sleep(1000);
   }
 } else if (cmd === "peek-burst") {
@@ -390,6 +391,7 @@ if (cmd === "send") {
       record_type: "claim",
       event: "claimed_burst",
       primary_id: burst.primary.id,
+      // eslint-disable-next-line no-empty
       message_ids: burst.messages.map((msg) => msg.id),
       layer: burst.primary.layer,
       sender: burst.primary.sender,

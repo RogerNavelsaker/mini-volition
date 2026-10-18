@@ -19,7 +19,7 @@ describe("Agent Jobs Local Events", () => {
   test("event-publish, event-claim, and event-complete persist local event lifecycle", () => {
     const published = JSON.parse(
       execSync(
-        `AGENT_JOBS_DB=${dbPath} META_REPO_ROOT=${tempDir} bun run src/agent-jobs/main.ts event-publish test-agent TaskCompleted agent-runtime \"child process finished\"`,
+        `AGENT_JOBS_DB=${dbPath} META_REPO_ROOT=${tempDir} bun run src/agent-jobs/main.ts event-publish test-agent TaskCompleted agent-runtime "child process finished"`,
       ).toString("utf-8"),
     ) as { id: number; event_type: string; status: string };
 

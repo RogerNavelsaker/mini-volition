@@ -15,6 +15,7 @@ export type RequestHandler = (request: any) => Promise<any>;
 export function startInferenceServer(socketPath: string, handler: RequestHandler, label: string) {
   try {
     unlinkSync(socketPath);
+  // eslint-disable-next-line no-empty
   } catch {}
 
   const server = createServer((connection: Socket) => {
